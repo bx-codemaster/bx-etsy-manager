@@ -1,0 +1,31 @@
+{
+    "name": "BX Etsy Manager",
+    "archiveName": "bx-codemaster/bx-etsy-manager",
+    "category": "productivity",
+    "developer": "Axel Benkert",
+    "developerWebsite": "https://www.bx-coding.de",
+    "website": "https://www.der-eisenhans.de",
+    "srcDir": "src",
+    "version": "auto",
+    "shortDescription": "BX Etsy Manager - Verwaltungslösung für Etsy-Shops",
+    "description": "BX Etsy Manager ist eine Lösung für die Verwaltung von Etsy-Shops.",
+    "price": "299.00", 
+    "date": "2026-04-25 00:00:00",
+    "php": {
+      "version": "^8.2"
+    },
+    "modifiedCompatibility": [
+      "3.0.1",
+      "3.0.2",
+      "3.1.0",
+      "3.1.1",
+      "3.1.2",
+      "3.1.3",
+      "3.1.4",
+      "3.1.5",
+      "3.1.6",
+      "3.2.0",
+      "3.2.1",
+      "3.3.0"
+    ]
+}

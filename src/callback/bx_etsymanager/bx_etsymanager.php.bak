@@ -1,0 +1,166 @@
+<?php
+/** --------------------------------------------------------------
+ * $Id: callback/bx_etsymanager/bx_etsymanager.php 00000 2026-01-15 12:00:00Z benax $
+ * modified eCommerce Shopsoftware
+ * http://www.modified-shop.org
+ * 
+ * BX Etsy Manager - OAuth 2.0 Callback Handler
+ * Empfängt Authorization Code von Etsy und tauscht ihn gegen Access Token
+ * 
+ * Copyright (c) 2026 [www.modified-shop.org]
+ * --------------------------------------------------------------
+ * Released under the GNU General Public License
+ * --------------------------------------------------------------
+ */
+
+// Modified Shop System laden
+chdir('../../');
+require_once('includes/application_top.php');
+
+// Etsy SDK laden
+if (file_exists(DIR_FS_CATALOG . 'admin/' . DIR_WS_CLASSES . 'modified_etsy/vendor/autoload.php')) {
+    require_once(DIR_FS_CATALOG . 'admin/' . DIR_WS_CLASSES . 'modified_etsy/vendor/autoload.php');
+} else {
+    die('Etsy SDK nicht gefunden. Bitte installieren Sie das SDK über Composer.');
+}
+
+/**
+ * OAuth 2.0 Callback Handler für Etsy
+ */
+
+// 1. Parameter von Etsy empfangen
+$code  = $_GET['code'] ?? null;
+$state = $_GET['state'] ?? null;
+$error = $_GET['error'] ?? null;
+$error_description = $_GET['error_description'] ?? null;
+
+// 2. Fehlerbehandlung: User hat Zugriff verweigert oder anderer Fehler
+if ($error) {
+    $_SESSION['etsy_error'] = $error_description ?: 'Etsy Autorisierung fehlgeschlagen: ' . $error;
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?error=auth_failed');
+    exit;
+}
+
+// 3. Validierung: Code und State müssen vorhanden sein
+if (!$code || !$state) {
+    $_SESSION['etsy_error'] = 'Ungültige Callback-Parameter: Code oder State fehlt';
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?error=invalid_callback');
+    exit;
+}
+
+// 4. CSRF-Schutz: State validieren
+if (!isset($_SESSION['etsy_oauth_state']) || $_SESSION['etsy_oauth_state'] !== $state) {
+    $_SESSION['etsy_error'] = 'CSRF-Validierung fehlgeschlagen: State stimmt nicht überein';
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?error=csrf_failed');
+    exit;
+}
+
+// 5. Code Verifier aus Session holen (wird für PKCE benötigt)
+if (!isset($_SESSION['etsy_code_verifier'])) {
+    $_SESSION['etsy_error'] = 'Code Verifier fehlt in Session';
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?error=verifier_missing');
+    exit;
+}
+
+$code_verifier = $_SESSION['etsy_code_verifier'];
+
+// 6. Konfiguration aus Datenbank laden
+$config_query = xtc_db_query("SELECT configuration_key, configuration_value 
+                               FROM " . TABLE_CONFIGURATION . " 
+                               WHERE configuration_key IN (
+                                   'MODULE_BX_ETSY_MANAGER_KEYSTRING',
+                                   'MODULE_BX_ETSY_MANAGER_SHARED_SECRET',
+                                   'MODULE_BX_ETSY_MANAGER_SHOP_ID',
+                                   'MODULE_BX_ETSY_MANAGER_REDIRECT_URI'
+                               )");
+
+$config = array();
+while ($row = xtc_db_fetch_array($config_query)) {
+    $config[$row['configuration_key']] = $row['configuration_value'];
+}
+
+$client_id     = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
+$shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
+$shop_id       = $config['MODULE_BX_ETSY_MANAGER_SHOP_ID'] ?? '';
+$redirect_uri  = $config['MODULE_BX_ETSY_MANAGER_REDIRECT_URI'] ?? '';
+
+// 7. Validierung: Konfiguration muss vollständig sein
+if (empty($client_id) || empty($shared_secret) || empty($redirect_uri)) {
+    $_SESSION['etsy_error'] = 'Etsy Konfiguration unvollständig. Bitte API-Zugangsdaten im Modul konfigurieren.';
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?error=config_incomplete');
+    exit;
+}
+
+try {
+    // 8. OAuth Client initialisieren
+    $client = new Etsy\OAuth\Client($client_id, $shared_secret);
+    
+    // 9. Access Token anfordern (Code gegen Token tauschen)
+    list($access_token, $refresh_token) = $client->requestAccessToken(
+        $redirect_uri,
+        $code,
+        $code_verifier
+    );
+    
+    // 10. User ID aus Access Token extrahieren (Format: "12345678.tokenstring")
+    $user_id = '';
+    if (strpos($access_token, '.') !== false) {
+        $user_id = explode('.', $access_token)[0];
+    }
+    
+    // 11. Token-Ablaufzeit berechnen (Access Token: 1 Stunde)
+    $expires_at = date('Y-m-d H:i:s', time() + 3600);
+    
+    // 12. Scopes aus Session holen (falls gespeichert)
+    $scopes = $_SESSION['etsy_oauth_scopes'] ?? '';
+    
+    // 13. In Datenbank speichern (INSERT oder UPDATE bei vorhandenem shop_id)
+    $now = date('Y-m-d H:i:s');
+    
+    // Prüfen ob bereits ein Token für diese Shop-ID existiert
+    $check_query = xtc_db_query("SELECT id FROM bx_etsy_oauth_tokens WHERE shop_id = '" . xtc_db_input($shop_id) . "'");
+    
+    // Daten-Array für xtc_db_perform vorbereiten
+    $token_data = array(
+        'access_token'  => $access_token,
+        'refresh_token' => $refresh_token,
+        'expires_at'    => $expires_at,
+        'scopes'        => $scopes,
+        'user_id'       => $user_id,
+        'updated_at'    => $now
+    );
+    
+    if (xtc_db_num_rows($check_query) > 0) {
+        // UPDATE: Token aktualisieren
+        xtc_db_perform('bx_etsy_oauth_tokens', $token_data, 'update', "shop_id = '" . xtc_db_input($shop_id) . "'");
+    } else {
+        // INSERT: Neuen Token erstellen (zusätzliche Felder für INSERT)
+        $token_data['shop_id']     = $shop_id;
+        $token_data['token_type']  = 'Bearer';
+        $token_data['created_at']  = $now;
+        
+        xtc_db_perform('bx_etsy_oauth_tokens', $token_data, 'insert');
+    }
+    
+    // 14. Session aufräumen
+    unset($_SESSION['etsy_oauth_state']);
+    unset($_SESSION['etsy_code_verifier']);
+    unset($_SESSION['etsy_oauth_scopes']);
+    
+    // 15. Erfolg: Zurück zum Admin-Interface
+    $_SESSION['etsy_success'] = 'Etsy Autorisierung erfolgreich! Shop ist jetzt verbunden.';
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?success=connected');
+    exit;
+    
+} catch (Exception $e) {
+    // 16. Fehlerbehandlung bei Token-Austausch
+    $_SESSION['etsy_error'] = 'Fehler beim Token-Austausch: ' . $e->getMessage();
+    
+    // Session-Daten aufräumen
+    unset($_SESSION['etsy_oauth_state']);
+    unset($_SESSION['etsy_code_verifier']);
+    unset($_SESSION['etsy_oauth_scopes']);
+    
+    header('Location: ' . HTTPS_SERVER . DIR_WS_ADMIN . 'bx_etsymanager.php?error=token_exchange');
+    exit;
+}
