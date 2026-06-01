@@ -3,19 +3,20 @@
     "scopes": {
         "shop-root": {
             "hashes": {
-                "/admin/bx_etsymanager.php": "1d62e59ac407b51bc678a172c4e627ef",
+                "/admin/bx_etsymanager.php": "afe6d18b20e534b30cb2b13f972d0fd6",
                 "/admin/images/icons/heading/bx_etsymanager.png": "76c2abbbf31b5d46c6d6792d87dc73b3",
                 "/admin/includes/extra/filenames/bx_etsymanager.php": "8b52c1990ec3b05382f663425f83dae3",
                 "/admin/includes/extra/functions/bx_etsymanager.php": "d1c8814a0335a611b4932017d6ab17de",
                 "/admin/includes/extra/javascript/bx_etsymanager.php": "7cf32727110a5d9f70e9c441d46788bf",
-                "/admin/includes/extra/menu/bx_etsymanager.php": "7705c96a539beccc5e10507c5789093d",
+                "/admin/includes/extra/menu/bx_etsymanager.php": "d9ecc15da38d0f958c00f9176cc2db84",
                 "/admin/includes/modules/system/bx_etsymanager.php": "8613d1bf8fb49d621ce8ab70ecf83be9",
                 "/callback/bx_etsymanager/bx_etsymanager.php": "75516b16c32002876198a7806e9bd4fb",
                 "/callback/bx_etsymanager/bx_etsymanager.php.bak": "e1f148327aa83f633eccaf3f82266983",
+                "/includes/extra/ajax/bx_etsymanager.php": "3ae8e742490907d35dc2c48ddd5355dd",
                 "/lang/english/extra/admin/bx_etsymanager.php": "4f28d98fd43f6c84af0bc87bca3fd6f3",
-                "/lang/english/modules/system/bx_etsymanager.php": "a037f0ce00dfc4ea2f1eae5de09f4903",
+                "/lang/english/modules/system/bx_etsymanager.php": "b4e0595259075f4c310ff4b396a2de9c",
                 "/lang/german/extra/admin/bx_etsymanager.php": "4f28d98fd43f6c84af0bc87bca3fd6f3",
-                "/lang/german/modules/system/bx_etsymanager.php": "fadc463c1cc43829c80ccba880ea804d"
+                "/lang/german/modules/system/bx_etsymanager.php": "914869417b5e071210369cdfec701302"
             }
         },
         "shop-vendor-mmlc": {

@@ -51,7 +51,7 @@
   define('MODULE_BX_ETSY_MANAGER_SHARED_SECRET_DESC', 'Ihr Etsy App Shared Secret aus dem <a href="https://www.etsy.com/developers/your-apps" target="_blank">Etsy Developer Portal</a>');
   
   define('MODULE_BX_ETSY_MANAGER_SHOP_ID_TITLE', 'Etsy Shop ID');
-  define('MODULE_BX_ETSY_MANAGER_SHOP_ID_DESC', 'Ihr Etsy Shop Name bzw. Shop ID (z.B. "MeinShopName2026")');
+  define('MODULE_BX_ETSY_MANAGER_SHOP_ID_DESC', 'Ihr Etsy Shop ID (z.B. 123456789)');
   
   define('MODULE_BX_ETSY_MANAGER_REDIRECT_URI_TITLE', 'OAuth Redirect URI');
   define('MODULE_BX_ETSY_MANAGER_REDIRECT_URI_DESC', 'Die Callback-URL für OAuth 2.0 Authentifizierung. Muss im <a href="https://www.etsy.com/developers/your-apps" target="_blank">Etsy Developer Portal</a> als Callback URL registriert sein. Standard: ' . HTTPS_SERVER . '/callback/bx_etsymanager/bx_etsymanager.php');

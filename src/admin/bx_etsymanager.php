@@ -36,7 +36,8 @@ $etsy_connected  = false;
 $etsy_token_data = null;
 $oauth_url       = '';
 $personalization_response_json = '';
-$personalization_sample_json = "[\n  {\n    \"question\": \"Bitte Wunschtext angeben\",\n    \"question_type\": \"text\",\n    \"required\": true,\n    \"max_length\": 100\n  },\n  {\n    \"question\": \"Schriftart wählen\",\n    \"question_type\": \"dropdown\",\n    \"required\": true,\n    \"options\": [\"Serif\", \"Sans\", \"Script\"]\n  },\n  {\n    \"question\": \"Datei-Upload für Gravur\",\n    \"question_type\": \"file_upload\",\n    \"required\": false\n  }\n]";
+// Beispiel für Personalisierungsfragen (neues Etsy-Personalisierungsmodell mit mehreren Fragen)
+$personalization_sample_json = "{\n  \"personalization_questions\": [\n    {\n      \"question_text\": \"Bitte Wunschtext angeben\",\n      \"question_type\": \"text_input\",\n      \"required\": true,\n      \"max_allowed_characters\": 100\n    }\n  ]\n}";
 
 // Action: Mit Etsy verbinden
 if (isset($_GET['action']) && $_GET['action'] == 'connect' && BX_ETSY_AVAILABLE) {
@@ -61,8 +62,15 @@ if (isset($_GET['action']) && $_GET['action'] == 'connect' && BX_ETSY_AVAILABLE)
     $shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
     $shop_id       = $config['MODULE_BX_ETSY_MANAGER_SHOP_ID'] ?? '';
     $redirect_uri  = $config['MODULE_BX_ETSY_MANAGER_REDIRECT_URI'] ?? '';
+
+    $runtime_redirect_uri = rtrim(HTTPS_SERVER, '/') . '/callback/bx_etsymanager/bx_etsymanager.php';
+    if ($runtime_redirect_uri !== $redirect_uri) {
+      error_log('BX Etsy: Redirect URI aus Konfiguration abweichend. Config=' . $redirect_uri . ' Runtime=' . $runtime_redirect_uri);
+      $redirect_uri = $runtime_redirect_uri;
+    }
+    error_log('BX Etsy: Verwende Redirect URI=' . $redirect_uri);
     
-    // Validierung
+    // Validierung: Shop-ID kann optional leer sein und wird im Callback via users/me ermittelt.
     if (empty($client_id) || empty($shared_secret) || empty($redirect_uri)) {
         $messageStack->add_session('Bitte konfigurieren Sie zuerst die Etsy API-Zugangsdaten im Modul.', 'error');
         xtc_redirect(xtc_href_link(FILENAME_MODULE_EXPORT, 'set=system&module=bx_etsymanager'));
@@ -104,10 +112,10 @@ if (isset($_GET['action']) && $_GET['action'] == 'connect' && BX_ETSY_AVAILABLE)
             $insert_result = xtc_db_perform('bx_etsy_oauth_state', array(
                 'state' => $state,
                 'code_verifier' => $verifier,
-                'scopes' => implode(' ', $scopes),
-                'shop_id' => $shop_id,
-                'created_at' => $now,
-                'expires_at' => $expires
+                'scopes'        => implode(' ', $scopes),
+                'shop_id'       => $shop_id,
+                'created_at'    => $now,
+                'expires_at'    => $expires
             ), 'insert');
             
             if (!$insert_result) {
@@ -178,6 +186,11 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
       xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
     }
 
+    if (!ctype_digit($shop_id)) {
+      $messageStack->add_session('Die Etsy Shop-ID muss numerisch sein.', 'error');
+      xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
+    }
+
     $token_data = bx_etsy_get_valid_token($shop_id);
     if (!$token_data || empty($token_data['access_token'])) {
       $messageStack->add_session('Kein gültiges Etsy Access Token verfügbar. Bitte Verbindung erneuern.', 'error');
@@ -185,13 +198,18 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
     }
 
     try {
-      new \Etsy\Etsy($client_id, $shared_secret, $token_data['access_token']);
-      $result = \Etsy\Resources\ListingPersonalization::get((int)$shop_id, $listing_id);
+      if (!function_exists('bx_etsy_get_listing_personalization')) {
+        throw new Exception('Personalisierungs-Helper nicht verfügbar.');
+      }
 
-      if ($result && method_exists($result, 'toArray')) {
-        $_SESSION['bx_etsy_personalization_response_json'] = json_encode($result->toArray(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+      $result = bx_etsy_get_listing_personalization((int)$shop_id, $listing_id, (string)$token_data['access_token'], $client_id, $shared_secret);
+
+      if (!empty($result['success'])) {
+        $response_data = is_array($result['data']) ? $result['data'] : array('message' => 'Keine Personalisierungsdaten gefunden.');
+        $_SESSION['bx_etsy_personalization_response_json'] = json_encode($response_data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
       } else {
-        $_SESSION['bx_etsy_personalization_response_json'] = json_encode(array('message' => 'Keine Personalisierungsdaten gefunden.'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        $error_text = (string)($result['error'] ?? 'Keine Personalisierungsdaten gefunden.');
+        $_SESSION['bx_etsy_personalization_response_json'] = json_encode(array('error' => $error_text), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
       }
       $_SESSION['bx_etsy_personalization_listing_id'] = (string)$listing_id;
       $messageStack->add_session('Personalisierung erfolgreich geladen.', 'success');
@@ -223,7 +241,60 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
       xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
     }
 
-    $payload = isset($decoded['personalization_questions']) ? $decoded : array('personalization_questions' => $decoded);
+    $raw_questions = isset($decoded['personalization_questions']) ? $decoded['personalization_questions'] : $decoded;
+    if (!is_array($raw_questions)) {
+      $messageStack->add_session('Ungültiges JSON: personalization_questions muss ein Array sein.', 'error');
+      xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
+    }
+
+    $normalized_questions = array();
+    $allowed_question_types = array('text_input', 'dropdown', 'unlabeled_upload', 'labeled_upload');
+    $type_map = array(
+      'text' => 'text_input',
+      'file_upload' => 'unlabeled_upload'
+    );
+
+    foreach ($raw_questions as $question) {
+      if (!is_array($question)) {
+        continue;
+      }
+
+      if (!isset($question['question_text']) && isset($question['question'])) {
+        $question['question_text'] = $question['question'];
+      }
+
+      $question_type = trim((string)($question['question_type'] ?? ''));
+      if (isset($type_map[$question_type])) {
+        $question_type = $type_map[$question_type];
+      }
+      $question['question_type'] = $question_type;
+
+      if (!isset($question['max_allowed_characters']) && isset($question['max_length'])) {
+        $question['max_allowed_characters'] = (int)$question['max_length'];
+      }
+
+      unset($question['question']);
+      unset($question['max_length']);
+
+      if (trim((string)($question['question_text'] ?? '')) === '') {
+        $messageStack->add_session('Jede Personalisierungsfrage braucht ein Feld question_text.', 'error');
+        xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
+      }
+
+      if (!in_array($question_type, $allowed_question_types, true)) {
+        $messageStack->add_session('Ungültiger question_type. Erlaubt: text_input, dropdown, unlabeled_upload, labeled_upload.', 'error');
+        xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
+      }
+
+      $normalized_questions[] = $question;
+    }
+
+    if (count($normalized_questions) === 0) {
+      $messageStack->add_session('Bitte mindestens eine gültige Personalisierungsfrage angeben.', 'error');
+      xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
+    }
+
+    $payload = array('personalization_questions' => $normalized_questions);
 
     if (!function_exists('bx_etsy_get_config') || !function_exists('bx_etsy_get_valid_token')) {
       $messageStack->add_session('BX Etsy Hilfsfunktionen sind nicht geladen.', 'error');
@@ -240,6 +311,11 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
       xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
     }
 
+    if (!ctype_digit($shop_id)) {
+      $messageStack->add_session('Die Etsy Shop-ID muss numerisch sein.', 'error');
+      xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
+    }
+
     $token_data = bx_etsy_get_valid_token($shop_id);
     if (!$token_data || empty($token_data['access_token'])) {
       $messageStack->add_session('Kein gültiges Etsy Access Token verfügbar. Bitte Verbindung erneuern.', 'error');
@@ -247,13 +323,18 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
     }
 
     try {
-      new \Etsy\Etsy($client_id, $shared_secret, $token_data['access_token']);
-      $result = \Etsy\Resources\ListingPersonalization::update((int)$shop_id, $listing_id, $payload, true);
+      if (!function_exists('bx_etsy_update_listing_personalization')) {
+        throw new Exception('Personalisierungs-Helper nicht verfügbar.');
+      }
 
-      if ($result && method_exists($result, 'toArray')) {
-        $_SESSION['bx_etsy_personalization_response_json'] = json_encode($result->toArray(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+      $result = bx_etsy_update_listing_personalization((int)$shop_id, $listing_id, $payload, (string)$token_data['access_token'], $client_id, $shared_secret);
+
+      if (!empty($result['success'])) {
+        $response_data = is_array($result['data']) ? $result['data'] : array('message' => 'Antwort ohne Datensatz erhalten.');
+        $_SESSION['bx_etsy_personalization_response_json'] = json_encode($response_data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
       } else {
-        $_SESSION['bx_etsy_personalization_response_json'] = json_encode(array('message' => 'Antwort ohne Datensatz erhalten.'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        $error_text = (string)($result['error'] ?? 'Personalisierung konnte nicht gespeichert werden.');
+        $_SESSION['bx_etsy_personalization_response_json'] = json_encode(array('error' => $error_text), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
       }
 
       $_SESSION['bx_etsy_personalization_listing_id'] = (string)$listing_id;

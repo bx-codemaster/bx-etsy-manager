@@ -142,6 +142,7 @@
       xtc_db_query("DELETE FROM ".TABLE_CONFIGURATION." WHERE configuration_key in ('".implode("', '", $this->keys())."')");
       xtc_db_query("DROP TABLE IF EXISTS bx_etsy_oauth_tokens");
       xtc_db_query("DROP TABLE IF EXISTS bx_etsy_oauth_state");
+      xtc_db_query("ALTER TABLE ".TABLE_ADMIN_ACCESS." DROP ".$this->code);
     }
 
     /**

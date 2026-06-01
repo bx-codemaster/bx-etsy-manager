@@ -1,12 +1,6 @@
 <?php
 /* ----------------------------------------------------------------------------------------------
    $Id: admin/includes/extra/functions/bx_etsymanager.php 1000 2026-02-03 13:00:00Z benax $
-    _                           
-   | |__   ___ _ __   __ ___  __
-   | '_ \ / _ \ '_ \ / _ \ \/ /
-   | |_) |  __/ | | | (_| |>  < 
-   |_.__/ \___|_| |_|\__,_/_/\_\
-   xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
    modified eCommerce Shopsoftware
    http://www.modified-shop.org
@@ -103,6 +97,12 @@ function bx_etsy_refresh_token($shop_id, $refresh_token) {
         if (empty($new_access_token)) {
             error_log('BX Etsy: Token-Refresh fehlgeschlagen - kein Access Token erhalten');
             return false;
+        }
+
+        // Etsy kann bei Refresh-Rotation ggf. kein neues Refresh-Token liefern.
+        // In dem Fall das bestehende Token weiterverwenden statt es zu leeren.
+        if (empty($new_refresh_token)) {
+            $new_refresh_token = $refresh_token;
         }
         
         // User ID von Etsy API holen (offizieller Weg)
@@ -249,6 +249,201 @@ function bx_etsy_get_user_id($access_token) {
         error_log('BX Etsy: Fehler beim Abrufen der User-ID: ' . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * Wandelt API-Responses (Objekt/Resource) in ein Array um.
+ *
+ * @param mixed $response
+ * @return array
+ */
+function bx_etsy_normalize_response_to_array($response) {
+    if (is_object($response) && method_exists($response, 'toArray')) {
+        return $response->toArray();
+    }
+
+    if (is_array($response)) {
+        return $response;
+    }
+
+    if (is_object($response)) {
+        $encoded = json_encode($response);
+        if ($encoded !== false) {
+            $decoded = json_decode($encoded, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+    }
+
+    return array();
+}
+
+/**
+ * Direkter Etsy API Request als Fallback, falls bestimmte SDK-Resources fehlen.
+ *
+ * @param string $method HTTP-Methode (GET/POST/...)
+ * @param string $path API-Pfad ab /v3
+ * @param string $access_token OAuth Access Token
+ * @param string $client_id Etsy Keystring
+ * @param string $shared_secret Etsy Shared Secret
+ * @param array|null $payload Optionales JSON-Payload
+ * @return array ['success'=>bool, 'data'=>array, 'error'=>string]
+ */
+function bx_etsy_api_request($method, $path, $access_token, $client_id, $shared_secret, $payload = null) {
+    if (!function_exists('curl_init')) {
+        return array(
+            'success' => false,
+            'data' => array(),
+            'error' => 'cURL ist auf dem Server nicht verfügbar.'
+        );
+    }
+
+    $url = 'https://api.etsy.com/v3' . $path;
+    $method = strtoupper((string)$method);
+
+    $headers = array(
+        'Accept: application/json',
+        'Authorization: Bearer ' . $access_token,
+        'x-api-key: ' . $client_id . ':' . $shared_secret
+    );
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+    if ($payload !== null) {
+        $json_payload = json_encode($payload);
+        if ($json_payload === false) {
+            return array(
+                'success' => false,
+                'data' => array(),
+                'error' => 'Payload konnte nicht als JSON codiert werden.'
+            );
+        }
+
+        $headers[] = 'Content-Type: application/json';
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $json_payload);
+    }
+
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+    $raw = curl_exec($ch);
+    if ($raw === false) {
+        $curl_error = curl_error($ch);
+        curl_close($ch);
+        return array(
+            'success' => false,
+            'data' => array(),
+            'error' => 'cURL-Fehler: ' . $curl_error
+        );
+    }
+
+    $http_code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        $decoded = array();
+    }
+
+    if ($http_code >= 200 && $http_code < 300) {
+        return array(
+            'success' => true,
+            'data' => $decoded,
+            'error' => ''
+        );
+    }
+
+    $error_message = '';
+    if (isset($decoded['error']) && is_string($decoded['error'])) {
+        $error_message = $decoded['error'];
+    }
+
+    if ($error_message === '') {
+        $error_message = 'HTTP ' . $http_code . ' von Etsy API';
+    }
+
+    return array(
+        'success' => false,
+        'data' => $decoded,
+        'error' => $error_message
+    );
+}
+
+/**
+ * Liest die Personalisierung eines Listings.
+ * Nutzt SDK-Resource, wenn vorhanden, sonst direkten API-Fallback.
+ *
+ * @param int $shop_id
+ * @param int $listing_id
+ * @param string $access_token
+ * @param string $client_id
+ * @param string $shared_secret
+ * @return array ['success'=>bool, 'data'=>array, 'error'=>string]
+ */
+function bx_etsy_get_listing_personalization($shop_id, $listing_id, $access_token, $client_id, $shared_secret) {
+    try {
+        if (class_exists('Etsy\\Resources\\ListingPersonalization') && class_exists('Etsy\\Etsy')) {
+            new \Etsy\Etsy($client_id, $shared_secret, $access_token);
+            $result = \Etsy\Resources\ListingPersonalization::get((int)$shop_id, (int)$listing_id);
+
+            return array(
+                'success' => true,
+                'data' => bx_etsy_normalize_response_to_array($result),
+                'error' => ''
+            );
+        }
+    } catch (Exception $e) {
+        error_log('BX Etsy: SDK-Personalisierung GET fehlgeschlagen, wechsle auf API-Fallback: ' . $e->getMessage());
+    }
+
+    return bx_etsy_api_request(
+        'GET',
+        '/application/listings/' . (int)$listing_id . '/personalization',
+        $access_token,
+        $client_id,
+        $shared_secret
+    );
+}
+
+/**
+ * Aktualisiert die Personalisierung eines Listings.
+ * Nutzt SDK-Resource, wenn vorhanden, sonst direkten API-Fallback.
+ *
+ * @param int $shop_id
+ * @param int $listing_id
+ * @param array $payload
+ * @param string $access_token
+ * @param string $client_id
+ * @param string $shared_secret
+ * @return array ['success'=>bool, 'data'=>array, 'error'=>string]
+ */
+function bx_etsy_update_listing_personalization($shop_id, $listing_id, array $payload, $access_token, $client_id, $shared_secret) {
+    try {
+        if (class_exists('Etsy\\Resources\\ListingPersonalization') && class_exists('Etsy\\Etsy')) {
+            new \Etsy\Etsy($client_id, $shared_secret, $access_token);
+            $result = \Etsy\Resources\ListingPersonalization::update((int)$shop_id, (int)$listing_id, $payload, true);
+
+            return array(
+                'success' => true,
+                'data' => bx_etsy_normalize_response_to_array($result),
+                'error' => ''
+            );
+        }
+    } catch (Exception $e) {
+        error_log('BX Etsy: SDK-Personalisierung UPDATE fehlgeschlagen, wechsle auf API-Fallback: ' . $e->getMessage());
+    }
+
+    return bx_etsy_api_request(
+        'POST',
+        '/application/shops/' . (int)$shop_id . '/listings/' . (int)$listing_id . '/personalization?supports_multiple_personalization_questions=true',
+        $access_token,
+        $client_id,
+        $shared_secret,
+        $payload
+    );
 }
 
 /**

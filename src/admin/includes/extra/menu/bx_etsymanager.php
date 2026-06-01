@@ -30,7 +30,7 @@ if( defined("MODULE_BX_ETSY_MANAGER_STATUS") && 'True' === MODULE_BX_ETSY_MANAGE
 	}
 	
 	//BOX_HEADING_TOOLS = Name der box in der der neue Menueeintrag erscheinen soll
-	$add_contents[BOX_HEADING_TOOLS][] = array(
+	$add_contents[BOX_HEADING_BX_MODULES][] = array(
 		'admin_access_name' => 'bx_etsymanager',   //Eintrag fuer Adminrechte
 		'filename'   => 'bx_etsymanager.php',      //Dateiname der neuen Admindatei
 		'boxname'    => MENU_NAME_BX_ETSY_MANAGER, //Anzeigename im Menue
