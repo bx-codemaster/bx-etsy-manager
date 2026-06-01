@@ -18,5 +18,5 @@
 
 
   define('MODULE_BX_ETSY_MANAGER', 'BX Etsy Manager');
-  define('MODULE_BX_ETSY_MANAGER_SUBTITLE', 'Verwalten Sie Ihre Produkte direkt aus dem modified eCommerce Shop in Ihren Etsy Shop');
+  define('MODULE_BX_ETSY_MANAGER_SUBTITLE', 'Verwalten Sie Ihre Produkte direkt aus der <span style="color:#B0347E;">mod</span><span style="color:#6D6D6D;">ified eCommerce Shopsoftware</span> in Ihren Etsy Shop');
 

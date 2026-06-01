@@ -43,7 +43,7 @@ defined('_VALID_XTC') or die('Direct Access to this location is not allowed.');
  * BX Etsy Manager - Token Expiration Countdown Timer
  * Zeigt die verbleibende Zeit bis zum Token-Ablauf in Echtzeit an
  */
-(function() {
+document.addEventListener('DOMContentLoaded', function () {
     'use strict';
     
     /**
@@ -264,8 +264,40 @@ defined('_VALID_XTC') or die('Direct Access to this location is not allowed.');
     
     // Global verfügbar machen
     window.bxEtsyInitTokenCountdown = initTokenCountdown;
+
+    // Auto-Initialisierung für Countdown-Container aus dem Admin-Markup
+    var autoContainers = document.querySelectorAll('#bx-etsy-token-countdown[data-expires-timestamp], .bx-etsy-token-countdown[data-expires-timestamp]');
+    for (var i = 0; i < autoContainers.length; i++) {
+        var autoContainer = autoContainers[i];
+        var expiresRaw = autoContainer.getAttribute('data-expires-timestamp');
+        var expiresTimestamp = parseInt(expiresRaw, 10);
+
+        if (!isNaN(expiresTimestamp) && expiresTimestamp > 0) {
+            if (!autoContainer.id) {
+                autoContainer.id = 'bx-etsy-token-countdown-' + i;
+            }
+            initTokenCountdown(expiresTimestamp, autoContainer.id);
+        }
+    }
     
-})();
+    // Fixed MessageStack anzeigen (falls vorhanden)
+    var fixedStack = document.querySelector('.fixed_messageStack');
+    if (fixedStack) {
+        if (typeof window.jQuery !== 'undefined' && typeof window.jQuery.fn !== 'undefined') {
+            window.jQuery(fixedStack).stop(true, true).slideDown('slow', function() {
+                setTimeout(function() {
+                    window.jQuery(fixedStack).slideUp('slow');
+                }, 3000);
+            });
+        } else {
+            fixedStack.style.display = 'block';
+            setTimeout(function() {
+                fixedStack.style.display = 'none';
+            }, 3000);
+        }
+    }
+
+});
 </script>
 
 <?php

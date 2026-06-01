@@ -156,7 +156,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
         $shop_id     = $shop_id_row['configuration_value'];
         
         xtc_db_query("DELETE FROM bx_etsy_oauth_tokens WHERE shop_id = '" . xtc_db_input($shop_id) . "'");
-        $messageStack->add_session('Etsy-Verbindung wurde getrennt.', 'success');
+        $messageStack->add_session('✅ Etsy-Verbindung wurde getrennt.', 'success');
     }
     
     xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
@@ -212,7 +212,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
         $_SESSION['bx_etsy_personalization_response_json'] = json_encode(array('error' => $error_text), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
       }
       $_SESSION['bx_etsy_personalization_listing_id'] = (string)$listing_id;
-      $messageStack->add_session('Personalisierung erfolgreich geladen.', 'success');
+      $messageStack->add_session('✅ Personalisierung erfolgreich geladen.', 'success');
     } catch (Exception $e) {
       $messageStack->add_session('Fehler beim Laden der Personalisierung: ' . $e->getMessage(), 'error');
     }
@@ -301,9 +301,9 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
       xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
     }
 
-    $config = bx_etsy_get_config();
-    $shop_id = trim((string)($config['MODULE_BX_ETSY_MANAGER_SHOP_ID'] ?? ''));
-    $client_id = trim((string)($config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? ''));
+    $config        = bx_etsy_get_config();
+    $shop_id       = trim((string)($config['MODULE_BX_ETSY_MANAGER_SHOP_ID'] ?? ''));
+    $client_id     = trim((string)($config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? ''));
     $shared_secret = trim((string)($config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? ''));
 
     if ($shop_id === '' || $client_id === '' || $shared_secret === '') {
@@ -431,18 +431,13 @@ $messageStack->output();
         <tr>
           <td class="boxCenterLeft">
             <!-- BOF Bereich für eventuelle Filter Features -->
-            <div class="main" style="display: flex; flex-direction: row; justify-content: left; align-items: center; background: #AF417E; color: #ffffff; border-radius: 4px; margin: 0 0 5px 0; padding: 4px 0 2px 0;">
+            <div id="headboard">
               <div class="main" style="margin: 5px 10px;"><strong><?php echo MODULE_BX_ETSY_MANAGER; ?></strong></div>
               <div class="main" style="margin: 5px 10px;">&nbsp;</div>
             </div>
             <!-- EOF Bereich für eventuelle Filter Features -->
             
             <?php
-            // Erfolgs-/Fehlermeldungen
-            if (isset($_GET['success']) && $_GET['success'] == 'connected') {
-                echo '<div class="success_message" style="margin: 10px 0;">✅ Erfolgreich mit Etsy verbunden!</div>';
-            }
-            
             if (isset($_GET['error'])) {
                 $error_msg = 'Fehler beim Verbinden mit Etsy.';
                 switch ($_GET['error']) {
@@ -523,7 +518,7 @@ $messageStack->output();
       $contents[] = array('text' => '<div class="warning_message" style="font-size: 11px;">⚠️ Etsy SDK nicht gefunden</div>');
   } elseif ($etsy_connected) {
       // Verbunden
-      $contents[] = array('text' => '<div style="background: linear-gradient(135deg, #00b894 0%, #00cec9 100%); border: 3px solid #00b894; border-radius: 8px; padding: 20px; margin: 5px 0; text-align: center; box-shadow: 0 4px 15px rgba(0,184,148,0.4); position: relative; overflow: hidden;">
+      $contents[] = array('text' => '<div style="background: linear-gradient(135deg, #00b894 0%, #00cec9 100%); border: 3px solid #00b894; border-radius: 8px; padding: 0px 20px 10px 20px; margin: 5px 0; text-align: center; box-shadow: 0 4px 15px rgba(0,184,148,0.4); position: relative; overflow: hidden;">
                                       <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2) 0%, transparent 70%);"></div>
                                       <span style="color: #ffffff; font-size: 48px; display: block; margin-bottom: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.2); animation: pulse 2s ease-in-out infinite;">🎉</span>
                                       <strong style="color: #ffffff; display: block; font-size: 16px; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">✨ VERBUNDEN ✨</strong>
@@ -535,18 +530,13 @@ $messageStack->output();
       
       // Verbleibende Zeit
       $expires_timestamp = strtotime($etsy_token_data['expires_at']);
-      $contents[] = array('text' => '<div id="bx-etsy-token-countdown">Lade Timer...</div>
-                                     <script>
-                                     if (typeof window.bxEtsyInitTokenCountdown === "function") {
-                                         window.bxEtsyInitTokenCountdown(' . $expires_timestamp . ', "bx-etsy-token-countdown");
-                                     }
-                                     </script>');
+      $contents[] = array('text' => '<div id="bx-etsy-token-countdown" data-expires-timestamp="' . (int)$expires_timestamp . '">Lade Timer...</div>');
       
       $contents[] = array('text' => '<div style="margin-top: 10px;">' . xtc_button_link('⭕ Trennen', xtc_href_link(FILENAME_ETSY_MANAGER, 'action=disconnect')) . '</div>');
       
   } else {
       // Nicht verbunden
-      $contents[] = array('text' => '<div style="background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%); border: 2px solid #e17055; border-radius: 6px; padding: 15px; margin: 5px 0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      $contents[] = array('text' => '<div style="background: linear-gradient(135deg, #ffeaa7 0%, #fdcb6e 100%); border: 2px solid #e17055; border-radius: 6px; padding: 0px 20px 10px 20px; margin: 5px 0; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                                       <span style="color: #d63031; font-size: 36px; display: block; margin-bottom: 10px;">❌</span>
                                       <strong style="color: #2d3436; display: block; margin-bottom: 5px;">Nicht verbunden</strong>
                                     </div>');
@@ -606,21 +596,18 @@ $messageStack->output();
   // =============================================================================
   // Etsy Developer Portal Link
   // =============================================================================
-
-  if ($etsy_connected) {
-      $heading  = array();
-      $contents = array();
-      
-      $heading[]  = array('text' => '<strong>🔧 Etsy API</strong>');
-      $contents[] = array('text' => '<a href="https://www.etsy.com/developers/your-apps" target="_blank" class="button">🔗 Developer Portal</a>');
-      $contents[] = array('text' => 'Verwalten Sie Ihre App-Zugangsdaten');
-      
-      if ( (xtc_not_null($heading)) && (xtc_not_null($contents)) ) {
-        $box = new box;
-        echo $box->infoBox($heading, $contents);
-      }
-  } // endif etsy_connected
-
+  
+    $heading  = array();
+    $contents = array();
+    
+    $heading[]  = array('text' => '<strong>🔧 Etsy API</strong>');
+    $contents[] = array('text' => '<a href="https://www.etsy.com/developers/your-apps" target="_blank" class="button">🔗 Developer Portal</a>');
+    $contents[] = array('text' => 'Verwalten Sie Ihre App-Zugangsdaten');
+    
+    if ( (xtc_not_null($heading)) && (xtc_not_null($contents)) ) {
+      $box = new box;
+      echo $box->infoBox($heading, $contents);
+    }
 ?>
           </td>
         </tr>

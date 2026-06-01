@@ -3,20 +3,20 @@
     "scopes": {
         "shop-root": {
             "hashes": {
-                "/admin/bx_etsymanager.php": "afe6d18b20e534b30cb2b13f972d0fd6",
+                "/admin/bx_etsymanager.php": "1033db7dc9a98441cb8c4999ad6db254",
                 "/admin/images/icons/heading/bx_etsymanager.png": "76c2abbbf31b5d46c6d6792d87dc73b3",
+                "/admin/includes/extra/css/bx_etsymanager.php": "e9272fcbdd971c733b9af5d6b676f1d8",
                 "/admin/includes/extra/filenames/bx_etsymanager.php": "8b52c1990ec3b05382f663425f83dae3",
-                "/admin/includes/extra/functions/bx_etsymanager.php": "d1c8814a0335a611b4932017d6ab17de",
-                "/admin/includes/extra/javascript/bx_etsymanager.php": "7cf32727110a5d9f70e9c441d46788bf",
+                "/admin/includes/extra/functions/bx_etsymanager.php": "6f5fbc0e47b0f57060aac6ce832aef72",
+                "/admin/includes/extra/javascript/bx_etsymanager.php": "9b219e9da1892aa01328300a3244da5f",
                 "/admin/includes/extra/menu/bx_etsymanager.php": "d9ecc15da38d0f958c00f9176cc2db84",
-                "/admin/includes/modules/system/bx_etsymanager.php": "8613d1bf8fb49d621ce8ab70ecf83be9",
-                "/callback/bx_etsymanager/bx_etsymanager.php": "75516b16c32002876198a7806e9bd4fb",
-                "/callback/bx_etsymanager/bx_etsymanager.php.bak": "e1f148327aa83f633eccaf3f82266983",
+                "/admin/includes/modules/system/bx_etsymanager.php": "d450d43bc8cbf172478158eed58c352b",
+                "/callback/bx_etsymanager/bx_etsymanager.php": "73d2e9bf3af3d07df189df0b3a315d77",
                 "/includes/extra/ajax/bx_etsymanager.php": "3ae8e742490907d35dc2c48ddd5355dd",
-                "/lang/english/extra/admin/bx_etsymanager.php": "4f28d98fd43f6c84af0bc87bca3fd6f3",
-                "/lang/english/modules/system/bx_etsymanager.php": "b4e0595259075f4c310ff4b396a2de9c",
-                "/lang/german/extra/admin/bx_etsymanager.php": "4f28d98fd43f6c84af0bc87bca3fd6f3",
-                "/lang/german/modules/system/bx_etsymanager.php": "914869417b5e071210369cdfec701302"
+                "/lang/english/extra/admin/bx_etsymanager.php": "1f8dcf8c6e0619d170d51f9287cab8c5",
+                "/lang/english/modules/system/bx_etsymanager.php": "af8688f87539fd8fdb52609d3260d762",
+                "/lang/german/extra/admin/bx_etsymanager.php": "610cc9ebd104f4941287c2450e767754",
+                "/lang/german/modules/system/bx_etsymanager.php": "d230d0e1682b3000ddda93e6eb2987e7"
             }
         },
         "shop-vendor-mmlc": {
