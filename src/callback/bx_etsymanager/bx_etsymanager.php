@@ -83,6 +83,35 @@ function bx_etsy_callback_log($message) {
     @error_log($line . PHP_EOL, 3, $log_file);
 }
 
+/**
+ * Lädt die Etsy-Konfiguration für den Callback zentral aus der Datenbank.
+ *
+ * @return array
+ */
+function bx_etsy_callback_get_config() {
+    static $config = null;
+
+    if ($config !== null) {
+        return $config;
+    }
+
+    $config_query = xtc_db_query("SELECT configuration_key, configuration_value
+                                    FROM " . TABLE_CONFIGURATION . "
+                                   WHERE configuration_key IN (
+                                       'MODULE_BX_ETSY_MANAGER_KEYSTRING',
+                                       'MODULE_BX_ETSY_MANAGER_SHARED_SECRET',
+                                       'MODULE_BX_ETSY_MANAGER_SHOP_ID',
+                                       'MODULE_BX_ETSY_MANAGER_REDIRECT_URI'
+                                   )");
+
+    $config = array();
+    while ($row = xtc_db_fetch_array($config_query)) {
+        $config[$row['configuration_key']] = $row['configuration_value'];
+    }
+
+    return $config;
+}
+
 bx_etsy_callback_log('Callback aufgerufen: code=' . ($code ? 'ja' : 'nein') . ', state=' . ($state ? 'ja' : 'nein') . ', error=' . ($error ?: ''));
 
 if (session_status() === PHP_SESSION_ACTIVE) {
@@ -92,19 +121,26 @@ if (session_status() === PHP_SESSION_ACTIVE) {
 /**
  * Holt Self-Infos über den offiziellen Etsy Endpoint /v3/application/users/me.
  *
- * @param Etsy\OAuth\Client $client
+ * Nutzt die statische Etsy-Klasse für direkte API-Requests (Etsy::$client->get()),
+ * NICHT den OAuth\Client. Der OAuth\Client kennt nur den Token-Handshake
+ * (requestAccessToken, refreshAccessToken, ...) und hat weder setApiKey() noch get().
+ *
+ * @param string $client_id
+ * @param string $shared_secret
  * @param string $access_token
  * @return array ['shop_id' => string, 'user_id' => string]
  */
-function bx_etsy_callback_get_self_info($client, $access_token) {
+function bx_etsy_callback_get_self_info($client_id, $shared_secret, $access_token) {
     $result = array(
         'shop_id' => '',
         'user_id' => ''
     );
 
     try {
-        $client->setApiKey($access_token);
-        $self = $client->get('/application/users/me');
+        // Etsy-Ressource initialisieren (Pflicht vor jedem Ressourcen-/Client-Aufruf)
+        new \Etsy\Etsy($client_id, $shared_secret, $access_token);
+
+        $self = \Etsy\Etsy::$client->get('/application/users/me');
 
         bx_etsy_callback_log('users/me raw response: ' . json_encode($self));
 
@@ -136,8 +172,7 @@ function bx_etsy_callback_get_self_info($client, $access_token) {
             // Fallback: shop_id über User-Shop-Endpoint ermitteln.
             if ($result['shop_id'] === '' && $result['user_id'] !== '') {
                 try {
-                    $shops = $client->get('/application/users/' . (int)$result['user_id'] . '/shops');
-                    error_log('BX Etsy Callback: users/{user_id}/shops raw response: ' . json_encode($shops));
+                    $shops = \Etsy\Etsy::$client->get('/application/users/' . (int)$result['user_id'] . '/shops');
                     bx_etsy_callback_log('users/{user_id}/shops raw response: ' . json_encode($shops));
 
                     if (is_object($shops)) {
@@ -188,9 +223,9 @@ if (xtc_db_num_rows($state_query) === 0) {
     exit;
 }
 
-$state_row = xtc_db_fetch_array($state_query);
+$state_row     = xtc_db_fetch_array($state_query);
 $code_verifier = (string)($state_row['code_verifier'] ?? '');
-$state_scopes = (string)($state_row['scopes'] ?? '');
+$state_scopes  = (string)($state_row['scopes'] ?? '');
 $state_shop_id = (string)($state_row['shop_id'] ?? '');
 
 if ($code_verifier === '') {
@@ -200,20 +235,8 @@ if ($code_verifier === '') {
     exit;
 }
 
-// 6. Konfiguration aus Datenbank laden
-$config_query = xtc_db_query("SELECT configuration_key, configuration_value 
-                               FROM " . TABLE_CONFIGURATION . " 
-                               WHERE configuration_key IN (
-                                   'MODULE_BX_ETSY_MANAGER_KEYSTRING',
-                                   'MODULE_BX_ETSY_MANAGER_SHARED_SECRET',
-                                   'MODULE_BX_ETSY_MANAGER_SHOP_ID',
-                                   'MODULE_BX_ETSY_MANAGER_REDIRECT_URI'
-                               )");
-
-$config = array();
-while ($row = xtc_db_fetch_array($config_query)) {
-    $config[$row['configuration_key']] = $row['configuration_value'];
-}
+// 6. Konfiguration laden
+$config = bx_etsy_callback_get_config();
 
 $client_id     = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
 $shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
@@ -253,12 +276,12 @@ try {
     $access_token  = $token_response['access_token'] ?? '';
     $refresh_token = $token_response['refresh_token'] ?? '';
 
-    if ($access_token === '' || $refresh_token === '') {
+    if ($access_token === '' || $access_token === null || $refresh_token === '' || $refresh_token === null) {
         throw new Exception('Ungültige Token-Antwort von Etsy erhalten.');
     }
     
     // 10. Shop-ID/User-ID über offiziellen Endpoint users/me ermitteln
-    $self_info = bx_etsy_callback_get_self_info($client, $access_token);
+    $self_info = bx_etsy_callback_get_self_info($client_id, $shared_secret, $access_token);
 
     if ($self_info['shop_id'] === '' && $self_info['user_id'] !== '') {
         $self_info['shop_id'] = $self_info['user_id'];

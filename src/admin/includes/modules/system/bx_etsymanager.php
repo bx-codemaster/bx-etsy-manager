@@ -18,8 +18,6 @@
     public string $title;
     public string $description;
     public int $sort_order;
-    private int $freeId;
-    private int $freeSort;
     public string $enabled;
     public string $development_status;
     private bool $_check;
@@ -32,20 +30,6 @@
       $this->sort_order  = defined('MODULE_BX_ETSY_MANAGER_SORT_ORDER') ? MODULE_BX_ETSY_MANAGER_SORT_ORDER : 0;
       $this->enabled     = ((defined('MODULE_BX_ETSY_MANAGER_STATUS') && MODULE_BX_ETSY_MANAGER_STATUS == 'True') ? true : false);
       $this->development_status = '';
-
-      $freeId_query = xtc_db_query("SELECT MIN(configuration_group_id+1) AS id 
-                                  FROM ".TABLE_CONFIGURATION_GROUP." 
-                                  WHERE (configuration_group_id+1) 
-                                          NOT IN (SELECT configuration_group_id FROM ".TABLE_CONFIGURATION_GROUP." WHERE configuration_group_id IS NOT NULL);");
-      $freeId = xtc_db_fetch_array($freeId_query);
-      $this->freeId = $freeId["id"];
-
-      $freeSort_query = xtc_db_query("SELECT MIN(sort_order+1) AS sort_order 
-                                            FROM ".TABLE_CONFIGURATION_GROUP." 
-                                            WHERE (sort_order+1) 
-                                          NOT IN (SELECT sort_order FROM ".TABLE_CONFIGURATION_GROUP." WHERE sort_order IS NOT NULL);");
-      $freeSort = xtc_db_fetch_array($freeSort_query);
-      $this->freeSort = $freeSort["sort_order"];
       }
 
     /**
@@ -73,6 +57,20 @@
       * @return void
       */
     public function install(): void {
+      $freeId_query = xtc_db_query("SELECT MIN(configuration_group_id+1) AS id 
+                                  FROM ".TABLE_CONFIGURATION_GROUP." 
+                                  WHERE (configuration_group_id+1) 
+                                          NOT IN (SELECT configuration_group_id FROM ".TABLE_CONFIGURATION_GROUP." WHERE configuration_group_id IS NOT NULL);");
+      $freeId = xtc_db_fetch_array($freeId_query);
+      $freeIdValue = (int)$freeId["id"];
+
+      $freeSort_query = xtc_db_query("SELECT MIN(sort_order+1) AS sort_order 
+                                            FROM ".TABLE_CONFIGURATION_GROUP." 
+                                            WHERE (sort_order+1) 
+                                          NOT IN (SELECT sort_order FROM ".TABLE_CONFIGURATION_GROUP." WHERE sort_order IS NOT NULL);");
+      $freeSort = xtc_db_fetch_array($freeSort_query);
+      $freeSortValue = (int)$freeSort["sort_order"];
+
       xtc_db_query("ALTER TABLE ".TABLE_ADMIN_ACCESS." ADD ".$this->code." INTEGER(1) DEFAULT 0");
       xtc_db_query("UPDATE ".TABLE_ADMIN_ACCESS." SET ".$this->code." = 1");
 
@@ -81,7 +79,7 @@
                                                                       configuration_group_description, 
                                                                       sort_order, 
                                                                       visible) 
-                  VALUES ( ".$this->freeId.", 'BX Etsy Manager Konfiguration', 'Modul einstellen und konfigurieren', ".$this->freeSort.", 1)");
+                  VALUES ( ".$freeIdValue.", 'BX Etsy Manager Konfiguration', 'Modul einstellen und konfigurieren', ".$freeSortValue.", 1)");
 
       xtc_db_query("INSERT INTO ".TABLE_CONFIGURATION." ( configuration_key, 
                                                                 configuration_value, 
@@ -90,13 +88,13 @@
                                                                 date_added, 
                                                                 use_function, 
                                                                 set_function )
-                  VALUES ('MODULE_BX_ETSY_MANAGER_STATUS', 'True', '".$this->freeId."', '1', NOW(), '', 'xtc_cfg_select_option(array(\'True\', \'False\'), '),
-                        ('MODULE_BX_ETSY_MANAGER_VERSION', '".$this->version."', '".$this->freeId."', '2', NOW(), '', ''),
-                        ('MODULE_BX_ETSY_MANAGER_CONFIG_ID', '".$this->freeId."', '".$this->freeId."', '3', NOW(), '', ''),
-                        ('MODULE_BX_ETSY_MANAGER_KEYSTRING', '', '".$this->freeId."', '4', NOW(), '', ''),
-                        ('MODULE_BX_ETSY_MANAGER_SHARED_SECRET', '', '".$this->freeId."', '5', NOW(), '', ''),
-                        ('MODULE_BX_ETSY_MANAGER_SHOP_ID', '', '".$this->freeId."', '6', NOW(), '', ''),
-                        ('MODULE_BX_ETSY_MANAGER_REDIRECT_URI', '', '".$this->freeId."', '7', NOW(), '', '');");
+                  VALUES ('MODULE_BX_ETSY_MANAGER_STATUS', 'True', '".$freeIdValue."', '1', NOW(), '', 'xtc_cfg_select_option(array(\'True\', \'False\'), '),
+                    ('MODULE_BX_ETSY_MANAGER_VERSION', '".$this->version."', '".$freeIdValue."', '2', NOW(), '', ''),
+                    ('MODULE_BX_ETSY_MANAGER_CONFIG_ID', '".$freeIdValue."', '".$freeIdValue."', '3', NOW(), '', 'bx_configuration_field_version('),
+                    ('MODULE_BX_ETSY_MANAGER_KEYSTRING', '', '".$freeIdValue."', '4', NOW(), '', ''),
+                    ('MODULE_BX_ETSY_MANAGER_SHARED_SECRET', '', '".$freeIdValue."', '5', NOW(), '', ''),
+                    ('MODULE_BX_ETSY_MANAGER_SHOP_ID', '', '".$freeIdValue."', '6', NOW(), '', 'bx_configuration_field_version('),
+                    ('MODULE_BX_ETSY_MANAGER_REDIRECT_URI', '', '".$freeIdValue."', '7', NOW(), '', '');");
       
       // Create OAuth tokens table
       xtc_db_query("CREATE TABLE bx_etsy_oauth_tokens (

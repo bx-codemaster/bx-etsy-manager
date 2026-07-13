@@ -3,14 +3,14 @@
     "scopes": {
         "shop-root": {
             "hashes": {
-                "/admin/bx_etsymanager.php": "1033db7dc9a98441cb8c4999ad6db254",
+                "/admin/bx_etsymanager.php": "a5488cf692a0f51e102b6b20b16e9286",
                 "/admin/images/icons/heading/bx_etsymanager.png": "76c2abbbf31b5d46c6d6792d87dc73b3",
-                "/admin/includes/extra/css/bx_etsymanager.php": "e9272fcbdd971c733b9af5d6b676f1d8",
+                "/admin/includes/extra/css/bx_etsymanager.php": "122d52444ef386aca4428c680e10e76f",
                 "/admin/includes/extra/filenames/bx_etsymanager.php": "8b52c1990ec3b05382f663425f83dae3",
-                "/admin/includes/extra/functions/bx_etsymanager.php": "6f5fbc0e47b0f57060aac6ce832aef72",
-                "/admin/includes/extra/javascript/bx_etsymanager.php": "9b219e9da1892aa01328300a3244da5f",
+                "/admin/includes/extra/functions/bx_etsymanager.php": "bf7d16d435bb7407c98c89df81405431",
+                "/admin/includes/extra/javascript/bx_etsymanager.php": "56de5efb8d1667cff55cd89d111ef1fe",
                 "/admin/includes/extra/menu/bx_etsymanager.php": "d9ecc15da38d0f958c00f9176cc2db84",
-                "/admin/includes/modules/system/bx_etsymanager.php": "d450d43bc8cbf172478158eed58c352b",
+                "/admin/includes/modules/system/bx_etsymanager.php": "198c4fd09279c7011cc449eaada87d1f",
                 "/callback/bx_etsymanager/bx_etsymanager.php": "73d2e9bf3af3d07df189df0b3a315d77",
                 "/includes/extra/ajax/bx_etsymanager.php": "3ae8e742490907d35dc2c48ddd5355dd",
                 "/lang/english/extra/admin/bx_etsymanager.php": "1f8dcf8c6e0619d170d51f9287cab8c5",

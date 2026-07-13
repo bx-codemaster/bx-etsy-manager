@@ -54,18 +54,7 @@ function bx_etsy_get_valid_token($shop_id) {
  */
 function bx_etsy_refresh_token($shop_id, $refresh_token) {
     // Konfiguration laden
-    $config_query = xtc_db_query("SELECT configuration_key, 
-                                                configuration_value 
-                                          FROM " . TABLE_CONFIGURATION . " 
-                                         WHERE configuration_key IN (
-                                                'MODULE_BX_ETSY_MANAGER_KEYSTRING',
-                                                'MODULE_BX_ETSY_MANAGER_SHARED_SECRET'
-                                            )");
-    
-    $config = array();
-    while ($row = xtc_db_fetch_array($config_query)) {
-        $config[$row['configuration_key']] = $row['configuration_value'];
-    }
+    $config = bx_etsy_get_config();
     
     $client_id     = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
     $shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
@@ -89,10 +78,9 @@ function bx_etsy_refresh_token($shop_id, $refresh_token) {
         
         // Token erneuern
         $token_response = $client->refreshAccessToken($refresh_token);
-        
         $new_access_token  = $token_response['access_token'] ?? '';
         $new_refresh_token = $token_response['refresh_token'] ?? '';
-        $expires_in        = $token_response['expires_in'] ?? 3600; // Fallback: 1 Stunde
+        $expires_in        = $token_response['expires_in'] ?? 3600;
         
         if (empty($new_access_token)) {
             error_log('BX Etsy: Token-Refresh fehlgeschlagen - kein Access Token erhalten');
@@ -149,11 +137,19 @@ function bx_etsy_refresh_token($shop_id, $refresh_token) {
  * Initialisiert einen Etsy API Client mit gültigem Access Token
  * 
  * @param string $shop_id Die Etsy Shop-ID
- * @return Etsy\EtsyClient|false Etsy Client Instanz oder false bei Fehler
+ * @return Etsy\Etsy|false Etsy Client Instanz oder false bei Fehler
  */
 function bx_etsy_get_api_client($shop_id) {
     // Gültiges Token holen (automatischer Refresh falls nötig)
-    $token_data = bx_etsy_get_valid_token($shop_id);
+    $token_data    = bx_etsy_get_valid_token($shop_id);
+    $config        = bx_etsy_get_config();
+    $client_id     = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
+    $shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
+        
+    if (empty($client_id) || empty($shared_secret)) {
+        error_log('BX Etsy: Konfiguration unvollständig für bx_etsy_get_api_client');
+        return false;
+    }
     
     if (!$token_data) {
         return false;
@@ -169,7 +165,7 @@ function bx_etsy_get_api_client($shop_id) {
         bx_dependency_resolver::require('modified_etsy');
         
         // API Client initialisieren
-        $client = new Etsy\EtsyClient($token_data['access_token']);
+        $client = new Etsy\Etsy($client_id, $shared_secret, $token_data['access_token']);
         
         return $client;
         
@@ -221,8 +217,8 @@ function bx_etsy_get_user_id($access_token) {
         }
         
         // API Client initialisieren
-        $config = bx_etsy_get_config();
-        $client_id = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
+        $config        = bx_etsy_get_config();
+        $client_id     = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
         $shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
         
         if (empty($client_id) || empty($shared_secret)) {
@@ -474,4 +470,13 @@ function bx_etsy_get_config() {
     }
     
     return $config;
+}
+
+/**
+ * Konfigurationseingabefeld für die Modulversion (read-only)
+ */
+if (!function_exists('bx_configuration_field_version')) {
+  function bx_configuration_field_version(string $value, string $constant): string {
+    return xtc_draw_input_field( 'configuration['.$constant.']', $value, 'readonly="true" style="opacity: 0.4;"');
+  }
 }

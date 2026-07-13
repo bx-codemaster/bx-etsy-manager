@@ -297,6 +297,70 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // Tab-Navigation mit Speicherung im LocalStorage
+    const tabs     = document.querySelectorAll('.etsy-tabs .tab-nav a');
+    const contents = document.querySelectorAll('.etsy-tabs .tab-content > div');
+
+    const STORAGE_KEY = 'bxEtsyManagerActiveTab';
+    const EXPIRATION_MS = 1000 * 60 * 60; // 1 Stunde
+
+    // Funktion zum Aktivieren eines Tabs
+    function activateTab(tabId) {
+        // Navigation
+        tabs.forEach(t => t.classList.remove('active'));
+        const activeTab = document.querySelector(`.etsy-tabs .tab-nav a[href="${tabId}"]`);
+        if (activeTab) activeTab.classList.add('active');
+
+        // Inhalte
+        contents.forEach(c => c.classList.remove('active'));
+        const target = document.querySelector(tabId);
+        if (target) target.classList.add('active');
+    }
+
+    // Klick-Handler
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function (e) {
+        e.preventDefault();
+        const tabId = this.getAttribute('href');
+        activateTab(tabId);
+
+        // Tab + Timestamp speichern
+        const data = {
+            tabId: tabId,
+            timestamp: Date.now()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        });
+    });
+
+    // Letzten Tab beim Laden wiederherstellen (nur wenn noch gültig)
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+        try {
+        const data = JSON.parse(stored);
+        if (Date.now() - data.timestamp < EXPIRATION_MS) {
+            // noch gültig
+            activateTab(data.tabId);
+        } else {
+            // abgelaufen -> löschen und ersten Tab aktivieren
+            localStorage.removeItem(STORAGE_KEY);
+            if (tabs.length > 0) {
+            activateTab(tabs[0].getAttribute('href'));
+            }
+        }
+        } catch (e) {
+        // falls JSON ungültig -> reset
+        localStorage.removeItem(STORAGE_KEY);
+        if (tabs.length > 0) {
+            activateTab(tabs[0].getAttribute('href'));
+        }
+        }
+    } else if (tabs.length > 0) {
+        // Standard: Ersten aktivieren
+        activateTab(tabs[0].getAttribute('href'));
+    }
+
+
 });
 </script>
 

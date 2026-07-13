@@ -43,20 +43,7 @@ $personalization_sample_json = "{\n  \"personalization_questions\": [\n    {\n  
 if (isset($_GET['action']) && $_GET['action'] == 'connect' && BX_ETSY_AVAILABLE) {
     
     // Konfiguration aus DB laden
-    $config_query = xtc_db_query("SELECT configuration_key, 
-                                                configuration_value 
-                                          FROM " . TABLE_CONFIGURATION . " 
-                                         WHERE configuration_key IN (
-                                                'MODULE_BX_ETSY_MANAGER_KEYSTRING',
-                                                'MODULE_BX_ETSY_MANAGER_SHARED_SECRET',
-                                                'MODULE_BX_ETSY_MANAGER_SHOP_ID',
-                                                'MODULE_BX_ETSY_MANAGER_REDIRECT_URI'
-                                            )");
-    
-    $config = array();
-    while ($row = xtc_db_fetch_array($config_query)) {
-        $config[$row['configuration_key']] = $row['configuration_value'];
-    }
+  $config = bx_etsy_get_config();
     
     $client_id     = $config['MODULE_BX_ETSY_MANAGER_KEYSTRING'] ?? '';
     $shared_secret = $config['MODULE_BX_ETSY_MANAGER_SHARED_SECRET'] ?? '';
@@ -146,15 +133,10 @@ if (isset($_GET['action']) && $_GET['action'] == 'connect' && BX_ETSY_AVAILABLE)
 
 // Action: Verbindung trennen
 if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
-    
-    $shop_id_query = xtc_db_query("SELECT configuration_value 
-                                    FROM " . TABLE_CONFIGURATION . " 
-                                    WHERE configuration_key = 'MODULE_BX_ETSY_MANAGER_SHOP_ID'");
-    
-    if (xtc_db_num_rows($shop_id_query) > 0) {
-        $shop_id_row = xtc_db_fetch_array($shop_id_query);
-        $shop_id     = $shop_id_row['configuration_value'];
-        
+  $config  = bx_etsy_get_config();
+  $shop_id = trim((string)($config['MODULE_BX_ETSY_MANAGER_SHOP_ID'] ?? ''));
+
+  if ($shop_id !== '') {
         xtc_db_query("DELETE FROM bx_etsy_oauth_tokens WHERE shop_id = '" . xtc_db_input($shop_id) . "'");
         $messageStack->add_session('✅ Etsy-Verbindung wurde getrennt.', 'success');
     }
@@ -349,14 +331,10 @@ if (isset($_GET['action']) && $_GET['action'] == 'disconnect') {
 
 // Token-Status prüfen
 if (BX_ETSY_AVAILABLE) {
-    $shop_id_query = xtc_db_query("SELECT configuration_value 
-                                    FROM " . TABLE_CONFIGURATION . " 
-                                    WHERE configuration_key = 'MODULE_BX_ETSY_MANAGER_SHOP_ID'");
-    
-    if (xtc_db_num_rows($shop_id_query) > 0) {
-        $shop_id_row = xtc_db_fetch_array($shop_id_query);
-        $shop_id     = $shop_id_row['configuration_value'];
-        
+  $config  = bx_etsy_get_config();
+  $shop_id = trim((string)($config['MODULE_BX_ETSY_MANAGER_SHOP_ID'] ?? ''));
+
+  if ($shop_id !== '') {
         $token_query = xtc_db_query("SELECT * FROM bx_etsy_oauth_tokens 
                                       WHERE shop_id = '" . xtc_db_input($shop_id) . "'");
         
@@ -436,39 +414,33 @@ $messageStack->output();
               <div class="main" style="margin: 5px 10px;">&nbsp;</div>
             </div>
             <!-- EOF Bereich für eventuelle Filter Features -->
-            
-            <?php
-            if (isset($_GET['error'])) {
-                $error_msg = 'Fehler beim Verbinden mit Etsy.';
-                switch ($_GET['error']) {
-                    case 'auth_failed':
-                        $error_msg = 'Etsy-Autorisierung fehlgeschlagen.';
-                        break;
-                    case 'csrf_failed':
-                        $error_msg = 'Sicherheitsprüfung fehlgeschlagen (CSRF). Bitte versuchen Sie es erneut.';
-                        break;
-                    case 'config_incomplete':
-                        $error_msg = 'Etsy-Konfiguration unvollständig. Bitte konfigurieren Sie das Modul.';
-                        break;
-                }
-                echo '<div class="error_message" style="margin: 10px 0;">⚠️ ' . $error_msg . '</div>';
-            }
-            ?>
-            <div class="clear div_box" style="padding: 10px; background-color: #f6f6f6; border: 1px solid #ddd; border-radius: 6px; max-width: 100%;">
-                <!-- Hauptbereich für zukünftige Features (Produktlisten, Orders, etc.) -->
-                <div class="main">
+
+            <div class="etsy-tabs">
+              <ul class="tab-nav">
+                <li><a href="#tab-dashboard"><span style="font-size: 14px;">📊</span> Dashboard</a></li>
+                <li><a href="#tab-products"><span style="font-size: 14px;">🛍️</span> Produkte</a></li>
+                <li><a href="#tab-support"><span style="font-size: 14px;">🛠️</span> Support</a></li>
+              </ul>
+
+              <div class="tab-content">
+
+                <!-- TAB 1: DASHBOARD //-->
+                <div id="tab-dashboard">
+
+                  <!-- Hauptbereich für zukünftige Features (Produktlisten, Orders, etc.) -->
+                  <div class="main">
                     <strong>📦 Produktverwaltung</strong>
                     <p>Demnächst verfügbar: Hier werden Ihre Etsy-Listings angezeigt.</p>
-                </div>
-                
-                <div class="main">
-                    <strong>📋 Bestellungen</strong>
-                    <p>Demnächst verfügbar: Hier können Sie Ihre Etsy-Bestellungen verwalten.</p>
-                </div>
+                  </div>
+                  
+                  <div class="main">
+                      <strong>📋 Bestellungen</strong>
+                      <p>Demnächst verfügbar: Hier können Sie Ihre Etsy-Bestellungen verwalten.</p>
+                  </div>
 
-                <?php if ($etsy_connected && BX_ETSY_AVAILABLE) { ?>
-                <hr style="margin: 15px 0; border: 0; border-top: 1px solid #ddd;">
-                <div class="main">
+                  <?php if ($etsy_connected && BX_ETSY_AVAILABLE) { ?>
+                  <hr style="margin: 15px 0; border: 0; border-top: 1px solid #ddd;">
+                  <div class="main">
                     <strong>🧩 Personalisierung (Etsy API v3)</strong>
                     <p>Testbereich für das neue Personalisierungsmodell mit mehreren Fragen (text, dropdown, file_upload).</p>
 
@@ -498,8 +470,25 @@ $messageStack->output();
                       <pre style="white-space: pre-wrap; background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 320px; overflow: auto;"><?php echo htmlspecialchars($personalization_response_json); ?></pre>
                     </div>
                     <?php } ?>
+                  </div>
+                  <?php } ?>
+
                 </div>
-                <?php } ?>
+                <!-- end tab-dashboard //-->
+
+                <!-- TAB 2: PRODUKTE //-->
+                <div id="tab-products">
+                  Produktliste
+                </div>
+                <!-- end tab-products //-->
+
+                <!-- TAB 3: SUPPORT-AKTIONEN //-->
+                <div id="tab-support">
+                  Support-Aktionen
+                </div>
+                <!-- end tab-support //-->
+
+              </div>
             </div>
 
           </td>
