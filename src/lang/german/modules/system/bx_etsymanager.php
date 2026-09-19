@@ -21,7 +21,8 @@
     <details class="bxac-card">
     <summary class="bxac-summary" style="list-style: none;">
       <span class="bxac-arrow">▸</span>
-      <span class="bxac-title">' . xtc_image(DIR_WS_ICONS.'heading/bx_etsymanager.png', 'BX Etsy Manager', '', '', 'style="max-height: 32px; vertical-align: middle; margin-right: 8px;"') . 'BX Etsy Manager</span>
+      ' . xtc_image(DIR_WS_ICONS.'heading/bx_etsymanager.png', 'BX Etsy Manager', '', '', 'style="max-height: 32px; margin: 2px;"') . '
+      <span class="bxac-title">BX Etsy Manager</span>
     </summary>
     <div class="bxac-body">
       <h3 style="margin-top: 0;">Artikelmanger für Etsy</h3>
@@ -49,9 +50,31 @@
   
   define('MODULE_BX_ETSY_MANAGER_SHARED_SECRET_TITLE', 'Etsy Shared Secret');
   define('MODULE_BX_ETSY_MANAGER_SHARED_SECRET_DESC', 'Ihr Etsy App Shared Secret aus dem <a href="https://www.etsy.com/developers/your-apps" target="_blank">Etsy Developer Portal</a>');
+
+  define('MODULE_BX_ETSY_MANAGER_WEBHOOK_SECRET_TITLE', 'Etsy Webhook Secret');
+  define('MODULE_BX_ETSY_MANAGER_WEBHOOK_SECRET_DESC', 'Ihr Etsy Webhook Secret aus dem <a href="https://www.etsy.com/developers/webhooks-consumer-portal/1455865997243" target="_blank">Etsy Developer Portal</a>');
   
   define('MODULE_BX_ETSY_MANAGER_SHOP_ID_TITLE', 'Etsy Shop ID');
   define('MODULE_BX_ETSY_MANAGER_SHOP_ID_DESC', 'Ihr Etsy Shop ID (z.B. 123456789)');
   
   define('MODULE_BX_ETSY_MANAGER_REDIRECT_URI_TITLE', 'OAuth Redirect URI');
   define('MODULE_BX_ETSY_MANAGER_REDIRECT_URI_DESC', 'Die Callback-URL für OAuth 2.0 Authentifizierung. Muss im <a href="https://www.etsy.com/developers/your-apps" target="_blank">Etsy Developer Portal</a> als Callback URL registriert sein. Standard: ' . HTTPS_SERVER . '/callback/bx_etsymanager/bx_etsymanager.php');
+
+  define('MODULE_BX_ETSY_MANAGER_DASHBOARD_CACHE_MINUTES_TITLE', 'Dashboard Cache Intervall (Minuten)');
+  define('MODULE_BX_ETSY_MANAGER_DASHBOARD_CACHE_MINUTES_DESC', 'Intervall in Minuten für den Etsy-Dashboard-Cache. 0 = Cache deaktiviert, 180 = 3 Stunden.');
+
+  define('MODULE_BX_ETSY_MANAGER_DASHBOARD_REQUEST_TIMEOUT_TITLE', 'Dashboard Request Timeout (Sekunden)');
+  define('MODULE_BX_ETSY_MANAGER_DASHBOARD_REQUEST_TIMEOUT_DESC', 'Timeout in Sekunden für die Etsy-Dashboard-Anfragen. Standard: 8 Sekunden.');
+
+  define('MODULE_BX_ETSY_MANAGER_MOCK_MODE_TITLE', 'Mock Mode');
+  define('MODULE_BX_ETSY_MANAGER_MOCK_MODE_DESC', 'Aktiviert den Mock Mode für die Etsy-API.');
+  define('MODULE_BX_ETSY_MANAGER_MOCK_SCENARIO_TITLE', 'Mock Scenario');
+  define('MODULE_BX_ETSY_MANAGER_MOCK_SCENARIO_DESC', 'Wählen Sie ein Mock-Szenario für die Etsy-API.');
+
+  define('MODULE_BX_ETSY_MANAGER_SCHEDULED_TASKS_TITLE', 'Scheduled Tasks aktivieren');
+  define('MODULE_BX_ETSY_MANAGER_SCHEDULED_TASKS_DESC', 'Aktiviert die periodische Synchronisation der Etsy-Bestellungen.');
+  define('MODULE_BX_ETSY_MANAGER_CHECK_INTERVAL_TITLE', 'Prüfintervall');
+  define('MODULE_BX_ETSY_MANAGER_CHECK_INTERVAL_DESC', 'Intervall für den Etsy-Order-Sync.');
+  define('MODULE_BX_ETSY_MANAGER_CHECK_UNIT_TITLE', 'Prüfeinheit');
+  define('MODULE_BX_ETSY_MANAGER_CHECK_UNIT_DESC', 'Einheit für den Etsy-Order-Sync (m, h, d, w).');
+  

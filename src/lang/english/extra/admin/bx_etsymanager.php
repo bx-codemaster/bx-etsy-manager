@@ -17,6 +17,8 @@
    ---------------------------------------------------------------------------------------*/
 
 
-  define('MODULE_BX_ETSY_MANAGER', 'BX Etsy Manager');
-  define('MODULE_BX_ETSY_MANAGER_SUBTITLE', 'Manage your products directly from the <span style="color:#B0347E;">mod</span><span style="color:#6D6D6D;">ified eCommerce Shopsoftware</span> into your Etsy shop');
 
+   define('MODULE_BX_ETSY_MANAGER', 'BX Etsy Manager');
+   define('MODULE_BX_ETSY_MANAGER_SUBTITLE', 'Manage your products directly from the <span style="color:#B0347E;">mod</span><span style="color:#6D6D6D;">ified eCommerce Shopsoftware</span> into your Etsy shop');
+   define('MODULE_BX_ETSY_MANAGER_NO_ORDERS', 'No Etsy orders found. The sync task has not transferred any data yet or there are no paid orders.');
+   define('MODULE_BX_ETSY_MANAGER_ORDERS_DISPLAY', 'Displaying <b>%d</b> to <b>%d</b> (of a total of <b>%d</b> orders)');
