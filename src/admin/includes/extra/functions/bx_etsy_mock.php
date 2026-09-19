@@ -39,6 +39,14 @@ if (!function_exists('bx_etsy_mock_response')) {
         if (file_exists($fixture_path)) {
             $content = file_get_contents($fixture_path);
             $decoded = json_decode($content, true);
+
+            if ($json_file === 'receipts.json' && isset($decoded['results'])) {
+                parse_str(parse_url($path, PHP_URL_QUERY) ?? '', $query_params);
+                $limit  = isset($query_params['limit']) ? (int)$query_params['limit'] : 25;
+                $offset = isset($query_params['offset']) ? (int)$query_params['offset'] : 0;
+                $decoded['results'] = array_slice($decoded['results'], $offset, $limit);
+            }
+            
             if (is_array($decoded)) {
                 if ($scenario === 'hohes_volumen') {
                     $today_start_ts = strtotime(date('Y-m-d 00:00:00'));

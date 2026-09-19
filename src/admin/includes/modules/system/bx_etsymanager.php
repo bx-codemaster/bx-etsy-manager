@@ -24,12 +24,12 @@
 
     public function __construct() {
       $this->code        = 'bx_etsymanager';
-      $this->version     = '0.5.0';
+      $this->version     = '0.6.5';
       $this->title       = MODULE_BX_ETSY_MANAGER_TITLE;
       $this->description = MODULE_BX_ETSY_MANAGER_DESC;
       $this->sort_order  = defined('MODULE_BX_ETSY_MANAGER_SORT_ORDER') ? MODULE_BX_ETSY_MANAGER_SORT_ORDER : 0;
       $this->enabled     = ((defined('MODULE_BX_ETSY_MANAGER_STATUS') && MODULE_BX_ETSY_MANAGER_STATUS == 'True') ? true : false);
-      $this->development_status = '';
+      $this->development_status = 'd';
       }
 
     /**

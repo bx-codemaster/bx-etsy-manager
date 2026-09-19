@@ -145,8 +145,14 @@ if (!function_exists('cron_bx_etsy_orders_sync')) {
       $processed_count         = 0;
       $skipped_unchanged_count = 0;
       $last_error              = '';
+      $max_iterations          = 2000; // z.B. 20.000 Datensätze als harte Obergrenze
+      $iteration               = 0;
 
       while (true) {
+        if (++$iteration > $max_iterations) {
+            $bx_log('error', 'ABBRUCH: Maximale Iterationszahl erreicht - möglicher Endlos-Loop.');
+            break;
+        }
         $api_path = '/application/shops/' . (int)$shop_id . '/receipts?limit=' . (int)$page_limit . '&offset=' . (int)$offset . '&was_paid=true&sort_on=created&sort_order=desc';
         $bx_log('info', 'API-Request: GET ' . $api_path);
 
