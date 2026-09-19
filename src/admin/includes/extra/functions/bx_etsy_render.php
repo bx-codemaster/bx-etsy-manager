@@ -1349,8 +1349,8 @@ if (!function_exists('bx_etsy_render_tab_listings')) {
     <article class="bx-panel"><p>Hier werden Sie die Listings sehen, die in Ihrem Etsy-Shop verfügbar sind.</p></article>
 
     <?php
-    $content= ob_get_clean();
-    $right = '';
+    $right = ob_get_clean();
+    $content = '';
 
     return array('content' => $content, 'right' => $right);
   }

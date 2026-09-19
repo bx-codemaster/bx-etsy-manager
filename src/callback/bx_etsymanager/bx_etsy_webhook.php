@@ -10,6 +10,58 @@
 chdir('../../');
 require_once('includes/application_top_callback.php');
 
+// Helper-Funktionen laden (Token, API-Request, Receipt-Upsert)
+require_once(DIR_FS_CATALOG . 'admin/includes/extra/functions/bx_etsy_oauth.php');
+require_once(DIR_FS_CATALOG . 'admin/includes/extra/functions/bx_etsy_general.php');
+require_once(DIR_FS_CATALOG . 'api/scheduled_tasks/modules/bx_etsy_orders_sync.php');
+
+// Im Callback-Kontext definiert application_top.php die MODULE_BX_ETSY_MANAGER_*
+// Konstanten NICHT automatisch (anders als im Admin-Kontext). bx_etsy_get_valid_token()
+// und bx_etsy_refresh_token() greifen aber direkt darauf zu - also hier analog zur
+// bestehenden bx_etsy_callback_get_config()-Logik im OAuth-Callback nachladen.
+if (!defined('MODULE_BX_ETSY_MANAGER_KEYSTRING') || !defined('MODULE_BX_ETSY_MANAGER_SHARED_SECRET')) {
+    $bx_webhook_table_configuration = defined('TABLE_CONFIGURATION') ? TABLE_CONFIGURATION : 'configuration';
+    $bx_webhook_cfg_query = xtc_db_query(
+        "SELECT configuration_key, configuration_value FROM " . $bx_webhook_table_configuration . "
+          WHERE configuration_key IN ('MODULE_BX_ETSY_MANAGER_KEYSTRING', 'MODULE_BX_ETSY_MANAGER_SHARED_SECRET')"
+    );
+    while ($bx_webhook_cfg_row = xtc_db_fetch_array($bx_webhook_cfg_query)) {
+        if (!defined($bx_webhook_cfg_row['configuration_key'])) {
+            define($bx_webhook_cfg_row['configuration_key'], (string)$bx_webhook_cfg_row['configuration_value']);
+        }
+    }
+    unset($bx_webhook_table_configuration, $bx_webhook_cfg_query, $bx_webhook_cfg_row);
+}
+
+/**
+ * Extrahiert Shop-ID und Receipt-ID aus der von Etsy gelieferten resource_url,
+ * z.B. https://api.etsy.com/v3/application/shops/12345/receipts/67890
+ *
+ * @param string $resource_url
+ * @return array{shop_id:string, receipt_id:string, path:string}
+ */
+function bx_etsy_webhook_parse_resource_url($resource_url) {
+    $result = array('shop_id' => '', 'receipt_id' => '', 'path' => '');
+
+    $path = (string)parse_url((string)$resource_url, PHP_URL_PATH);
+    if ($path === '') {
+        return $result;
+    }
+
+    // Alles ab "/v3" als relativer API-Pfad übernehmen (so wie bx_etsy_api_request() ihn erwartet).
+    $v3_pos = strpos($path, '/v3');
+    if ($v3_pos !== false) {
+        $result['path'] = substr($path, $v3_pos + 3); // +3 = Länge von "/v3"
+    }
+
+    if (preg_match('#/shops/(\d+)/receipts/(\d+)#', $path, $matches)) {
+        $result['shop_id']    = $matches[1];
+        $result['receipt_id'] = $matches[2];
+    }
+
+    return $result;
+}
+
 /**
  * Sends a JSON response and terminates script execution.
  *
@@ -263,14 +315,70 @@ if (!is_array($event)) {
     ));
 }
 
-$event_type = trim((string)($event['event_type'] ?? $event['type'] ?? 'unknown'));
-$event_id = trim((string)($event['event_id'] ?? $event['id'] ?? ''));
-$receipt_id = trim((string)($event['receipt_id'] ?? $event['resource_id'] ?? ''));
+$event_type   = trim((string)($event['event_type'] ?? $event['type'] ?? 'unknown'));
+$event_id     = trim((string)($event['event_id'] ?? $event['id'] ?? ''));
+$resource_url = trim((string)($event['resource_url'] ?? ''));
 
-bx_etsy_webhook_log('info', 'Accepted webhook event. type=' . $event_type . ' event_id=' . ($event_id !== '' ? $event_id : 'n/a') . ' receipt_id=' . ($receipt_id !== '' ? $receipt_id : 'n/a'));
+$resource = bx_etsy_webhook_parse_resource_url($resource_url);
+$shop_id     = $resource['shop_id'] !== '' ? $resource['shop_id'] : trim((string)($event['shop_id'] ?? ''));
+$receipt_id  = $resource['receipt_id'] !== '' ? $resource['receipt_id'] : trim((string)($event['receipt_id'] ?? ''));
 
-// Initial scaffold: acknowledge quickly. Next step is queueing + receipt sync by receipt_id.
+bx_etsy_webhook_log('info', 'Accepted webhook event. type=' . $event_type . ' event_id=' . ($event_id !== '' ? $event_id : 'n/a')
+    . ' shop_id=' . ($shop_id !== '' ? $shop_id : 'n/a') . ' receipt_id=' . ($receipt_id !== '' ? $receipt_id : 'n/a'));
+
+// Nur order.* Events verarbeiten wir hier (paid/canceled/shipped/delivered) - alles andere nur bestätigen.
+$relevant_events = array('order.paid', 'order.canceled', 'order.shipped', 'order.delivered');
+
+if (!in_array($event_type, $relevant_events, true) || $shop_id === '' || $receipt_id === '' || $resource['path'] === '') {
+    bx_etsy_webhook_log('info', 'Event ignoriert (kein relevanter order-Typ oder unvollständige resource_url).');
+    bx_etsy_webhook_respond(200, array('success' => true, 'status' => 'ignored'));
+}
+
+if (!ctype_digit($shop_id) || !function_exists('bx_etsy_get_valid_token')) {
+    bx_etsy_webhook_log('error', 'ABBRUCH: ungueltige shop_id oder Helper-Funktionen fehlen.');
+    // 200 statt 4xx/5xx: Etsy soll bei einem lokalen Konfigurationsfehler nicht endlos retryen.
+    bx_etsy_webhook_respond(200, array('success' => false, 'status' => 'skipped_config_error'));
+}
+
+$token_data = bx_etsy_get_valid_token($shop_id);
+if (!$token_data || empty($token_data['access_token'])) {
+    bx_etsy_webhook_log('error', 'ABBRUCH: kein gueltiges Access Token fuer shop_id=' . $shop_id);
+    bx_etsy_webhook_respond(200, array('success' => false, 'status' => 'skipped_no_token'));
+}
+
+$client_id     = trim((string)MODULE_BX_ETSY_MANAGER_KEYSTRING);
+$shared_secret = trim((string)MODULE_BX_ETSY_MANAGER_SHARED_SECRET);
+
+// Einzelnen Receipt gezielt nachladen (statt auf den naechsten Cron-Lauf zu warten).
+$receipt_response = bx_etsy_api_request(
+    'GET',
+    $resource['path'],
+    (string)$token_data['access_token'],
+    $client_id,
+    $shared_secret,
+    null,
+    15
+);
+
+if (empty($receipt_response['success']) || !isset($receipt_response['data']) || !is_array($receipt_response['data'])) {
+    bx_etsy_webhook_log('error', 'Receipt-Abruf fehlgeschlagen fuer receipt_id=' . $receipt_id . ': ' . (string)($receipt_response['error'] ?? 'unbekannter Fehler'));
+    // 500, damit Etsy den Webhook gemaess seinem Retry-Schema erneut zustellt (transientes API-Problem).
+    bx_etsy_webhook_respond(500, array('success' => false, 'status' => 'receipt_fetch_failed'));
+}
+
+$receipt = $receipt_response['data'];
+
+$upsert_status = function_exists('bx_etsy_orders_sync_upsert_receipt')
+    ? bx_etsy_orders_sync_upsert_receipt($shop_id, $receipt)
+    : 'error';
+
+bx_etsy_webhook_log('info', 'Verarbeitung abgeschlossen. event_type=' . $event_type . ' receipt_id=' . $receipt_id . ' status=' . $upsert_status);
+
+if ($upsert_status === 'error') {
+    bx_etsy_webhook_respond(500, array('success' => false, 'status' => 'upsert_failed'));
+}
+
 bx_etsy_webhook_respond(200, array(
     'success' => true,
-    'status' => 'accepted',
+    'status'  => $upsert_status, // 'synced' oder 'skipped_unchanged'
 ));

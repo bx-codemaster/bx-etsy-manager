@@ -221,154 +221,22 @@ if (!function_exists('cron_bx_etsy_orders_sync')) {
             continue;
           }
 
-          $order_created_at = $created_ts > 0 ? date('Y-m-d H:i:s', $created_ts) : $now;
-          $paid_at_ts       = bx_etsy_orders_sync_pick_timestamp($receipt, array('create_timestamp', 'created_timestamp'));
-          $paid_at          = $paid_at_ts > 0 ? date('Y-m-d H:i:s', $paid_at_ts) : null;
+          $existing_row  = $existing_receipts_map[$receipt_id] ?? null;
+          $upsert_status = bx_etsy_orders_sync_upsert_receipt($shop_id, $receipt, $existing_row, $now);
 
-          $buyer_name = isset($receipt['name']) ? trim((string)$receipt['name']) : '';
-          if ($buyer_name === '') {
-            $buyer_name = 'Etsy Buyer #' . $receipt_id;
-          }
-
-          $buyer_email = isset($receipt['buyer_email']) ? trim((string)$receipt['buyer_email']) : '';
-
-          $currency_code = '';
-          if (isset($receipt['grandtotal']) && is_array($receipt['grandtotal']) && isset($receipt['grandtotal']['currency_code'])) {
-            $currency_code = strtoupper(trim((string)$receipt['grandtotal']['currency_code']));
-          }
-          
-          if (strlen($currency_code) !== 3) {
-            $currency_code = 'EUR';
-          }
-
-          $grand_total    = (float)bx_etsy_extract_receipt_total_amount($receipt);
-          $payment_status = isset($receipt['status']) ? trim((string)$receipt['status']) : '';
-          if ($payment_status === '') {
-            $payment_status = 'paid';
-          }
-
-          $order_status = $payment_status;
-
-          $etsy_updated_at_ts = bx_etsy_orders_sync_pick_timestamp($receipt, array('updated_timestamp', 'updated_at', 'last_modified_timestamp'));
-          $etsy_updated_at = $etsy_updated_at_ts > 0 ? date('Y-m-d H:i:s', $etsy_updated_at_ts) : null;
-
-          $payload_wrapper = array(
-            'receipt' => $receipt,
-            'guest_order_context' => function_exists('bx_etsy_build_guest_order_context')
-              ? bx_etsy_build_guest_order_context($receipt, $shop_id)
-              : array(),
-          );
-
-          $payload_json = json_encode($payload_wrapper, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-          if ($payload_json === false) {
-            $payload_json = '{}';
-          }
-
-          $existing_row = $existing_receipts_map[$receipt_id] ?? null;
-          if (is_array($existing_row)) {
-            $existing_payload_json = (string)($existing_row['payload_json'] ?? '');
-            $existing_etsy_updated_at = trim((string)($existing_row['etsy_updated_at'] ?? ''));
-
-            $same_payload    = ($existing_payload_json !== '' && $existing_payload_json === $payload_json);
-            $same_updated_at = ($etsy_updated_at !== null
-                             && $existing_etsy_updated_at !== ''
-                             && $existing_etsy_updated_at === $etsy_updated_at);
-
-            if ($same_payload || $same_updated_at) {
+          switch ($upsert_status) {
+            case 'skipped_unchanged':
               $skipped_unchanged_count++;
-              continue;
-            }
-          }
-
-          $sync_data = array(
-            'shop_id'              => $shop_id,
-            'etsy_order_id'        => $receipt_id,
-            'receipt_id'           => $receipt_id,
-            'order_created_at'     => $order_created_at,
-            'paid_at'              => $paid_at,
-            'buyer_name'           => $buyer_name,
-            'buyer_email'          => ($buyer_email !== '' ? $buyer_email : null),
-            'currency_code'        => $currency_code,
-            'grand_total_gross'    => number_format($grand_total, 4, '.', ''),
-            'payment_status'       => $payment_status,
-            'order_status'         => $order_status,
-            'invoice_number'       => '',
-            'order_reference_shop' => (string)$shop_id,
-            'etsy_updated_at'      => $etsy_updated_at,
-            'synced_at'            => $now,
-            'sync_state'           => 'ok',
-            'sync_error_message'   => null,
-            'payload_json'         => $payload_json,
-            'created_at'           => $now,
-            'updated_at'           => $now,
-          );
-
-          $insert_sql = "INSERT INTO " . $table_name . " (
-                            shop_id,
-                            etsy_order_id,
-                            receipt_id,
-                            order_created_at,
-                            paid_at,
-                            buyer_name,
-                            buyer_email,
-                            currency_code,
-                            grand_total_gross,
-                            payment_status,
-                            order_status,
-                            invoice_number,
-                            order_reference_shop,
-                            etsy_updated_at,
-                            synced_at,
-                            sync_state,
-                            sync_error_message,
-                            payload_json,
-                            created_at,
-                            updated_at
-                          ) VALUES (
-                            '" . xtc_db_input($sync_data['shop_id']) . "',
-                            '" . xtc_db_input($sync_data['etsy_order_id']) . "',
-                            '" . xtc_db_input($sync_data['receipt_id']) . "',
-                            '" . xtc_db_input($sync_data['order_created_at']) . "',
-                            " . ($sync_data['paid_at'] !== null ? "'" . xtc_db_input($sync_data['paid_at']) . "'" : 'NULL') . ",
-                            '" . xtc_db_input($sync_data['buyer_name']) . "',
-                            " . ($sync_data['buyer_email'] !== null ? "'" . xtc_db_input($sync_data['buyer_email']) . "'" : 'NULL') . ",
-                            '" . xtc_db_input($sync_data['currency_code']) . "',
-                            '" . xtc_db_input($sync_data['grand_total_gross']) . "',
-                            '" . xtc_db_input($sync_data['payment_status']) . "',
-                            '" . xtc_db_input($sync_data['order_status']) . "',
-                            " . ($sync_data['invoice_number'] !== '' ? "'" . xtc_db_input($sync_data['invoice_number']) . "'" : 'NULL') . ",
-                            '" . xtc_db_input($sync_data['order_reference_shop']) . "',
-                            " . ($sync_data['etsy_updated_at'] !== null ? "'" . xtc_db_input($sync_data['etsy_updated_at']) . "'" : 'NULL') . ",
-                            '" . xtc_db_input($sync_data['synced_at']) . "',
-                            '" . xtc_db_input($sync_data['sync_state']) . "',
-                            '" . xtc_db_input($sync_data['sync_error_message']) . "',
-                            '" . xtc_db_input($sync_data['payload_json']) . "',
-                            '" . xtc_db_input($sync_data['created_at']) . "',
-                            '" . xtc_db_input($sync_data['updated_at']) . "'
-                          ) ON DUPLICATE KEY UPDATE
-                            receipt_id = VALUES(receipt_id),
-                            order_created_at = VALUES(order_created_at),
-                            paid_at = VALUES(paid_at),
-                            buyer_name = VALUES(buyer_name),
-                            buyer_email = VALUES(buyer_email),
-                            currency_code = VALUES(currency_code),
-                            grand_total_gross = VALUES(grand_total_gross),
-                            payment_status = VALUES(payment_status),
-                            order_status = VALUES(order_status),
-                            invoice_number = VALUES(invoice_number),
-                            order_reference_shop = VALUES(order_reference_shop),
-                            etsy_updated_at = VALUES(etsy_updated_at),
-                            synced_at = VALUES(synced_at),
-                            sync_state = VALUES(sync_state),
-                            sync_error_message = VALUES(sync_error_message),
-                            payload_json = VALUES(payload_json),
-                            updated_at = VALUES(updated_at)";
-
-          $db_result = xtc_db_query($insert_sql);
-          if ($db_result) {
-            $synced_count++;
-          } else {
-            $bx_log('error', 'INSERT FEHLGESCHLAGEN: receipt_id=' . $receipt_id);
+              break;
+            case 'error':
+              $bx_log('error', 'UPSERT FEHLGESCHLAGEN: receipt_id=' . $receipt_id);
+              break;
+            case 'skipped_no_id':
+              // bereits oben abgefangen, kommt hier praktisch nicht vor
+              break;
+            default: // 'synced'
+              $synced_count++;
+              break;
           }
         }
 
@@ -389,6 +257,176 @@ if (!function_exists('cron_bx_etsy_orders_sync')) {
     } finally {
       xtc_db_query("DO RELEASE_LOCK('" . xtc_db_input($lock_name) . "')");
     }
+  }
+}
+
+if (!function_exists('bx_etsy_orders_sync_upsert_receipt')) {
+  /**
+   * Mappt einen einzelnen Etsy-Receipt auf die lokale Tabelle bx_etsy_orders
+   * und schreibt ihn per UPSERT. Wird sowohl vom Cron-Delta-Sync (bulk, mit
+   * vorab geladener $existing_row zur Unchanged-Erkennung) als auch vom
+   * Webhook-Handler (Einzel-Receipt, $existing_row optional) genutzt, damit
+   * beide Aufrufer garantiert dieselbe Mapping-/Upsert-Logik verwenden.
+   *
+   * @param string $shop_id
+   * @param array $receipt Rohes Receipt-Objekt aus der Etsy-API (als Array)
+   * @param array|null $existing_row Vorab geladene bestehende Zeile (receipt_id, payload_json, etsy_updated_at) oder null
+   * @param string|null $now Zeitstempel für synced_at/created_at/updated_at (Standard: jetzt)
+   * @return string 'synced' | 'skipped_unchanged' | 'skipped_no_id' | 'error'
+   */
+  function bx_etsy_orders_sync_upsert_receipt(string $shop_id, array $receipt, ?array $existing_row = null, ?string $now = null): string
+  {
+    $table_name = 'bx_etsy_orders';
+    $now        = $now ?? date('Y-m-d H:i:s');
+
+    $receipt_id = isset($receipt['receipt_id']) ? trim((string)$receipt['receipt_id']) : '';
+    if ($receipt_id === '') {
+      return 'skipped_no_id';
+    }
+
+    $created_ts       = bx_etsy_extract_receipt_created_ts($receipt);
+    $order_created_at = $created_ts > 0 ? date('Y-m-d H:i:s', $created_ts) : $now;
+    $paid_at_ts       = bx_etsy_orders_sync_pick_timestamp($receipt, array('create_timestamp', 'created_timestamp'));
+    $paid_at          = $paid_at_ts > 0 ? date('Y-m-d H:i:s', $paid_at_ts) : null;
+
+    $buyer_name = isset($receipt['name']) ? trim((string)$receipt['name']) : '';
+    if ($buyer_name === '') {
+      $buyer_name = 'Etsy Buyer #' . $receipt_id;
+    }
+
+    $buyer_email = isset($receipt['buyer_email']) ? trim((string)$receipt['buyer_email']) : '';
+
+    $currency_code = '';
+    if (isset($receipt['grandtotal']) && is_array($receipt['grandtotal']) && isset($receipt['grandtotal']['currency_code'])) {
+      $currency_code = strtoupper(trim((string)$receipt['grandtotal']['currency_code']));
+    }
+
+    if (strlen($currency_code) !== 3) {
+      $currency_code = 'EUR';
+    }
+
+    $grand_total    = (float)bx_etsy_extract_receipt_total_amount($receipt);
+    $payment_status = isset($receipt['status']) ? trim((string)$receipt['status']) : '';
+    if ($payment_status === '') {
+      $payment_status = 'paid';
+    }
+
+    $order_status = $payment_status;
+
+    $etsy_updated_at_ts = bx_etsy_orders_sync_pick_timestamp($receipt, array('updated_timestamp', 'updated_at', 'last_modified_timestamp'));
+    $etsy_updated_at = $etsy_updated_at_ts > 0 ? date('Y-m-d H:i:s', $etsy_updated_at_ts) : null;
+
+    $payload_wrapper = array(
+      'receipt' => $receipt,
+      'guest_order_context' => function_exists('bx_etsy_build_guest_order_context')
+        ? bx_etsy_build_guest_order_context($receipt, $shop_id)
+        : array(),
+    );
+
+    $payload_json = json_encode($payload_wrapper, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($payload_json === false) {
+      $payload_json = '{}';
+    }
+
+    if (is_array($existing_row)) {
+      $existing_payload_json = (string)($existing_row['payload_json'] ?? '');
+      $existing_etsy_updated_at = trim((string)($existing_row['etsy_updated_at'] ?? ''));
+
+      $same_payload    = ($existing_payload_json !== '' && $existing_payload_json === $payload_json);
+      $same_updated_at = ($etsy_updated_at !== null
+                       && $existing_etsy_updated_at !== ''
+                       && $existing_etsy_updated_at === $etsy_updated_at);
+
+      if ($same_payload || $same_updated_at) {
+        return 'skipped_unchanged';
+      }
+    }
+
+    $sync_data = array(
+      'shop_id'              => $shop_id,
+      'etsy_order_id'        => $receipt_id,
+      'receipt_id'           => $receipt_id,
+      'order_created_at'     => $order_created_at,
+      'paid_at'              => $paid_at,
+      'buyer_name'           => $buyer_name,
+      'buyer_email'          => ($buyer_email !== '' ? $buyer_email : null),
+      'currency_code'        => $currency_code,
+      'grand_total_gross'    => number_format($grand_total, 4, '.', ''),
+      'payment_status'       => $payment_status,
+      'order_status'         => $order_status,
+      'invoice_number'       => '',
+      'order_reference_shop' => (string)$shop_id,
+      'etsy_updated_at'      => $etsy_updated_at,
+      'synced_at'            => $now,
+      'sync_state'           => 'ok',
+      'sync_error_message'   => null,
+      'payload_json'         => $payload_json,
+      'created_at'           => $now,
+      'updated_at'           => $now,
+    );
+
+    $insert_sql = "INSERT INTO " . $table_name . " (
+                      shop_id,
+                      etsy_order_id,
+                      receipt_id,
+                      order_created_at,
+                      paid_at,
+                      buyer_name,
+                      buyer_email,
+                      currency_code,
+                      grand_total_gross,
+                      payment_status,
+                      order_status,
+                      invoice_number,
+                      order_reference_shop,
+                      etsy_updated_at,
+                      synced_at,
+                      sync_state,
+                      sync_error_message,
+                      payload_json,
+                      created_at,
+                      updated_at
+                    ) VALUES (
+                      '" . xtc_db_input($sync_data['shop_id']) . "',
+                      '" . xtc_db_input($sync_data['etsy_order_id']) . "',
+                      '" . xtc_db_input($sync_data['receipt_id']) . "',
+                      '" . xtc_db_input($sync_data['order_created_at']) . "',
+                      " . ($sync_data['paid_at'] !== null ? "'" . xtc_db_input($sync_data['paid_at']) . "'" : 'NULL') . ",
+                      '" . xtc_db_input($sync_data['buyer_name']) . "',
+                      " . ($sync_data['buyer_email'] !== null ? "'" . xtc_db_input($sync_data['buyer_email']) . "'" : 'NULL') . ",
+                      '" . xtc_db_input($sync_data['currency_code']) . "',
+                      '" . xtc_db_input($sync_data['grand_total_gross']) . "',
+                      '" . xtc_db_input($sync_data['payment_status']) . "',
+                      '" . xtc_db_input($sync_data['order_status']) . "',
+                      " . ($sync_data['invoice_number'] !== '' ? "'" . xtc_db_input($sync_data['invoice_number']) . "'" : 'NULL') . ",
+                      '" . xtc_db_input($sync_data['order_reference_shop']) . "',
+                      " . ($sync_data['etsy_updated_at'] !== null ? "'" . xtc_db_input($sync_data['etsy_updated_at']) . "'" : 'NULL') . ",
+                      '" . xtc_db_input($sync_data['synced_at']) . "',
+                      '" . xtc_db_input($sync_data['sync_state']) . "',
+                      '" . xtc_db_input($sync_data['sync_error_message']) . "',
+                      '" . xtc_db_input($sync_data['payload_json']) . "',
+                      '" . xtc_db_input($sync_data['created_at']) . "',
+                      '" . xtc_db_input($sync_data['updated_at']) . "'
+                    ) ON DUPLICATE KEY UPDATE
+                      receipt_id = VALUES(receipt_id),
+                      order_created_at = VALUES(order_created_at),
+                      paid_at = VALUES(paid_at),
+                      buyer_name = VALUES(buyer_name),
+                      buyer_email = VALUES(buyer_email),
+                      currency_code = VALUES(currency_code),
+                      grand_total_gross = VALUES(grand_total_gross),
+                      payment_status = VALUES(payment_status),
+                      order_status = VALUES(order_status),
+                      invoice_number = VALUES(invoice_number),
+                      order_reference_shop = VALUES(order_reference_shop),
+                      etsy_updated_at = VALUES(etsy_updated_at),
+                      synced_at = VALUES(synced_at),
+                      sync_state = VALUES(sync_state),
+                      sync_error_message = VALUES(sync_error_message),
+                      payload_json = VALUES(payload_json),
+                      updated_at = VALUES(updated_at)";
+
+    return xtc_db_query($insert_sql) ? 'synced' : 'error';
   }
 }
 
