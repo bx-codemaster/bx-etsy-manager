@@ -157,6 +157,7 @@
           grand_total_gross decimal(15,4) NOT NULL DEFAULT 0.0000,
           payment_status varchar(32) NOT NULL DEFAULT 'unpaid',
           order_status varchar(32) NOT NULL DEFAULT 'new',
+          is_shipped tinyint(1) NOT NULL DEFAULT 0,
           invoice_number varchar(64) DEFAULT NULL,
           order_reference_shop varchar(64) DEFAULT NULL,
           etsy_updated_at datetime DEFAULT NULL,
@@ -172,6 +173,7 @@
           KEY idx_orders_shop_payment (shop_id, payment_status),
           KEY idx_orders_shop_status (shop_id, order_status),
           KEY idx_orders_shop_synced (shop_id, synced_at),
+          KEY idx_orders_shop_unshipped (shop_id, is_shipped),
           KEY idx_orders_invoice (shop_id, invoice_number)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
@@ -222,7 +224,18 @@
       
     }
 
-    public function update() {}
+    public function update() {
+      // Migration fuer bereits installierte Module: is_shipped-Spalte nachruesten,
+      // falls sie noch nicht existiert (z.B. Update von einer Version vor 0.7.0).
+      $orders_table_check = xtc_db_query("SHOW TABLES LIKE 'bx_etsy_orders'");
+      if (xtc_db_num_rows($orders_table_check) > 0) {
+        $is_shipped_col_check = xtc_db_query("SHOW COLUMNS FROM bx_etsy_orders LIKE 'is_shipped'");
+        if (xtc_db_num_rows($is_shipped_col_check) === 0) {
+          xtc_db_query("ALTER TABLE bx_etsy_orders ADD COLUMN is_shipped TINYINT(1) NOT NULL DEFAULT 0 AFTER order_status");
+          xtc_db_query("ALTER TABLE bx_etsy_orders ADD KEY idx_orders_shop_unshipped (shop_id, is_shipped)");
+        }
+      }
+    }
       
     /**
       * Actions performed when the user clicks the uninstall button.

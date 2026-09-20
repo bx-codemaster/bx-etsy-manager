@@ -45,6 +45,15 @@ defined('_VALID_XTC') or die('Direct Access to this location is not allowed.');
  */
 document.addEventListener('DOMContentLoaded', function () {
     'use strict';
+
+    // Event-Delegation statt direktem addEventListener: der Button steckt im
+    // Dashboard-Tab-Inhalt, der per AJAX neu geladen werden kann (Lazy-Tabs).
+    document.addEventListener('click', function (e) {
+        const syncBtn = e.target.closest('#bx-etsy-manual-sync-btn');
+        if (syncBtn) {
+            triggerManualSync(syncBtn);
+        }
+    });
     
     /**
      * Initialisiert den Countdown-Timer für das Etsy Access Token
@@ -244,6 +253,80 @@ document.addEventListener('DOMContentLoaded', function () {
         };
         
         xhr.send('refresh=1');
+    }
+
+    /**
+     * Stößt den Bestellungen-Sync manuell an (Button im Dashboard-Header).
+     * Nutzt dieselbe Cron-Funktion wie ein echter Server-Cronjob.
+     */
+    function triggerManualSync(btn) {
+        const statusEl = document.getElementById('bx-etsy-manual-sync-status');
+        const originalLabel = btn.innerHTML;
+
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Synchronisiere...';
+        if (statusEl) {
+            statusEl.textContent = '';
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '<?php echo DIR_WS_CATALOG; ?>ajax.php?ext=bx_etsymanager&method=trigger_manual_sync', true);
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.onload = function () {
+            btn.disabled = false;
+            btn.innerHTML = originalLabel;
+
+            if (xhr.status !== 200) {
+                if (statusEl) {
+                    statusEl.textContent = '❌ Server-Fehler (' + xhr.status + ')';
+                    statusEl.style.color = '#dc3545';
+                }
+                return;
+            }
+
+            try {
+                const raw = (xhr.responseText || '').trim();
+                if (!raw) {
+                    throw new Error('Leere Server-Antwort');
+                }
+
+                const response = JSON.parse(raw);
+
+                if (response.success) {
+                    if (statusEl) {
+                        // textContent statt innerHTML: Nachricht kann Zaehler aus der DB enthalten,
+                        // kein Grund unnoetig HTML zu interpretieren.
+                        statusEl.textContent = '✅ ' + (response.message || 'Sync abgeschlossen.');
+                        statusEl.style.color = '#28a745';
+                    }
+                    setTimeout(function () {
+                        window.location.reload();
+                    }, 1500);
+                } else if (statusEl) {
+                    statusEl.textContent = '❌ ' + (response.error || response.message || 'Unbekannter Fehler');
+                    statusEl.style.color = '#dc3545';
+                }
+            } catch (e) {
+                console.error('BX Etsy: Parse Error', e);
+                if (statusEl) {
+                    statusEl.textContent = '❌ Ungültige Server-Antwort';
+                    statusEl.style.color = '#dc3545';
+                }
+            }
+        };
+
+        xhr.onerror = function () {
+            btn.disabled = false;
+            btn.innerHTML = originalLabel;
+            if (statusEl) {
+                statusEl.textContent = '❌ Verbindungsfehler';
+                statusEl.style.color = '#dc3545';
+            }
+        };
+
+        xhr.send('sync=1');
     }
     
     /**

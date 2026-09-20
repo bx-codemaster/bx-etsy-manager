@@ -632,17 +632,23 @@ if (!function_exists('bx_etsy_extract_transaction_amount')) {
 }
 
 /**
- * Liefert die Live-KPI-Daten für das Dashboard aus Etsy-Receipts.
+ * Liefert die Dashboard-KPI-Daten aus der lokalen Tabelle bx_etsy_orders,
+ * die per Webhook (Echtzeit) und Cron-Delta-Sync (Sicherheitsnetz) aktuell
+ * gehalten wird - kein Live-Scan über die Etsy-API mehr.
  *
- * Konsolidierter Single-Fetch: paginiert rückwärts (neueste zuerst) durch die
- * Receipts, bricht ab sobald ein Receipt älter als Monatsbeginn ist, und
- * berechnet in einem Durchlauf Umsatz (heute/Woche/Monat), Bestellungen,
- * sowie Top-/Low-Performer-Listings aus den enthaltenen Transaktionen.
+ * Einzige Ausnahme: "Neue Bewertungen heute" gibt es aktuell nicht lokal
+ * synchronisiert (keine Reviews-Tabelle/Sync), das kommt daher weiterhin
+ * per einzelnem Live-Request von Etsy - leicht gecacht, da nicht zeitkritisch.
+ *
+ * Der Verbindungsstatus (connection_active) ist bewusst unabhängig von den
+ * KPI-Werten: Auch wenn die Etsy-Verbindung gerade unterbrochen ist, bleiben
+ * die bereits synchronisierten lokalen Zahlen sichtbar, statt das ganze
+ * Dashboard leerzuräumen.
  *
  * @return array
  */
-if (!function_exists('bx_etsy_get_dashboard_live_kpis')) {
-  function bx_etsy_get_dashboard_live_kpis(): array
+if (!function_exists('bx_etsy_get_dashboard_kpis')) {
+  function bx_etsy_get_dashboard_kpis(): array
   {
     global $modified_cache;
 
@@ -659,178 +665,81 @@ if (!function_exists('bx_etsy_get_dashboard_live_kpis')) {
       'connection_active'  => false,
       'data_fetch_success' => false,
       'last_error'         => '',
+      'last_synced_at'     => null,
     );
 
-    if (!function_exists('bx_etsy_get_valid_token')) {
+    $shop_id = trim((string)MODULE_BX_ETSY_MANAGER_SHOP_ID);
+
+    if ($shop_id === '' || !ctype_digit($shop_id)) {
       return $result;
     }
 
-    $shop_id                   = (string)MODULE_BX_ETSY_MANAGER_SHOP_ID;
-    $client_id                 = (string)MODULE_BX_ETSY_MANAGER_KEYSTRING;
-    $shared_secret             = (string)MODULE_BX_ETSY_MANAGER_SHARED_SECRET;
-    $cache_minutes             = (int)MODULE_BX_ETSY_MANAGER_DASHBOARD_CACHE_MINUTES;
-    $dashboard_request_timeout = (int)MODULE_BX_ETSY_MANAGER_DASHBOARD_REQUEST_TIMEOUT;
+    $is_mock_mode = function_exists('bx_etsy_mock_enabled') && bx_etsy_mock_enabled();
 
-    if ($cache_minutes < 0) {
-      $cache_minutes = 0;
-    }
+    // Verbindungsstatus ist ein eigenständiges Signal (siehe Docblock oben),
+    // getrennt von den lokal berechneten KPI-Zahlen weiter unten.
+    $result['connection_active'] = $is_mock_mode
+      || (function_exists('bx_etsy_is_connected') && bx_etsy_is_connected($shop_id));
 
-    if ($dashboard_request_timeout < 3) {
-      $dashboard_request_timeout = 3;
-    } elseif ($dashboard_request_timeout > 30) {
-      $dashboard_request_timeout = 30;
-    }
+    $shop_id_sql   = xtc_db_input($shop_id);
+    $today_start   = date('Y-m-d 00:00:00');
+    $week_start_ts = strtotime('monday this week 00:00:00');
+    $week_start    = ($week_start_ts !== false) ? date('Y-m-d H:i:s', $week_start_ts) : $today_start;
+    $month_start   = date('Y-m-01 00:00:00');
 
-    $cache_ttl_seconds = $cache_minutes * 60;
+    // --- Ein Aggregat-Query für Umsatz heute/Woche/Monat, Bestellungen heute,
+    //     unversendete Bestellungen und den Zeitpunkt der letzten Synchronisation ---
+    $agg_sql = "SELECT
+                    COALESCE(SUM(CASE WHEN order_created_at >= '" . xtc_db_input($today_start) . "' THEN grand_total_gross ELSE 0 END), 0) AS revenue_today,
+                    COALESCE(SUM(CASE WHEN order_created_at >= '" . xtc_db_input($today_start) . "' THEN 1 ELSE 0 END), 0) AS orders_today,
+                    COALESCE(SUM(CASE WHEN order_created_at >= '" . xtc_db_input($week_start) . "' THEN grand_total_gross ELSE 0 END), 0) AS revenue_week,
+                    COALESCE(SUM(CASE WHEN order_created_at >= '" . xtc_db_input($month_start) . "' THEN grand_total_gross ELSE 0 END), 0) AS revenue_month,
+                    COALESCE(SUM(CASE WHEN is_shipped = 0 AND LOWER(payment_status) != 'canceled' THEN 1 ELSE 0 END), 0) AS unshipped_count,
+                    MAX(synced_at) AS last_synced_at,
+                    COUNT(*) AS total_rows
+                 FROM bx_etsy_orders
+                WHERE shop_id = '" . $shop_id_sql . "'";
 
-    $is_mock_mode  = function_exists('bx_etsy_mock_enabled') && bx_etsy_mock_enabled();
-    $mock_scenario = ($is_mock_mode && function_exists('bx_etsy_get_mock_scenario'))
-      ? (string)bx_etsy_get_mock_scenario()
-      : 'live';
+    $agg_query = xtc_db_query($agg_sql);
 
-    if ($is_mock_mode) {
-      // Im Mock-Modus keine Session-Cache-Werte nutzen, damit Fixture-Änderungen sofort sichtbar sind.
-      $cache_ttl_seconds = 0;
-    }
-
-    $cache_key = 'bx_etsy_dashboard_live_kpis_v4_' . $shop_id . '_' . ($is_mock_mode ? 'mock' : 'live') . '_' . preg_replace('/[^a-zA-Z0-9_\-]/', '_', $mock_scenario);
-    $cache_backend = null;
-
-    if ($shop_id === '' || $client_id === '' || $shared_secret === '' || !ctype_digit($shop_id)) {
+    if ($agg_query === false) {
+      $result['last_error'] = 'Lokale KPI-Abfrage fehlgeschlagen (SQL-Fehler). Details siehe Server-Errorlog.';
       return $result;
     }
 
-    if ($cache_ttl_seconds > 0 && defined('DB_CACHE') && DB_CACHE == 'true') {
-      if (!is_object($modified_cache) && defined('DIR_FS_CATALOG')) {
-        include_once(DIR_FS_CATALOG . 'includes/modified_cache.php');
-      }
+    $agg_row = xtc_db_fetch_array($agg_query);
 
-      if (is_object($modified_cache)) {
-        $cache_backend = $modified_cache;
-        $cache_backend->setId($cache_key);
+    $result['data_fetch_success'] = true;
+    $result['revenue_today']      = (float)($agg_row['revenue_today'] ?? 0.0);
+    $result['revenue_week']       = (float)($agg_row['revenue_week'] ?? 0.0);
+    $result['revenue_month']      = (float)($agg_row['revenue_month'] ?? 0.0);
+    $result['new_orders_today']   = (int)($agg_row['orders_today'] ?? 0);
+    $result['unshipped_count']    = (int)($agg_row['unshipped_count'] ?? 0);
+    $result['last_synced_at']     = trim((string)($agg_row['last_synced_at'] ?? '')) ?: null;
+    $result['avg_order_today']    = ($result['new_orders_today'] > 0)
+      ? ($result['revenue_today'] / $result['new_orders_today'])
+      : 0.0;
 
-        if ($cache_backend->isHit() !== false) {
-          $cached_data = $cache_backend->get();
-          if (is_array($cached_data)) {
-            return $cached_data;
-          }
-        }
-      }
-    }
+    // --- Top-/Low-Performer-Listings: Transaktionen aus payload_json der
+    //     Bestellungen des laufenden Monats auswerten (lokal, kein API-Call). ---
+    $month_orders_query = xtc_db_query(
+      "SELECT payload_json FROM bx_etsy_orders
+        WHERE shop_id = '" . $shop_id_sql . "'
+          AND order_created_at >= '" . xtc_db_input($month_start) . "'"
+    );
 
-    $access_token = '';
-
-    if ($is_mock_mode) {
-      // Im Mock-Modus ist kein OAuth-Token erforderlich.
-      $result['connection_active'] = true;
-      $access_token = 'mock_access_token';
-    } else {
-      $token_data = bx_etsy_get_valid_token($shop_id);
-
-      if (!$token_data || empty($token_data['access_token'])) {
-        return $result;
-      }
-
-      $result['connection_active'] = true;
-      $access_token = (string)$token_data['access_token'];
-    }
-
-    // Langer I/O-Teil (Etsy API): Session-Lock früh freigeben.
-    if (function_exists('session_status')
-        && defined('PHP_SESSION_ACTIVE')
-        && session_status() === PHP_SESSION_ACTIVE
-        && function_exists('session_write_close')
-    ) {
-      session_write_close();
-    }
-
-    $today_start_ts = strtotime(date('Y-m-d 00:00:00'));
-    $week_start_ts  = strtotime('monday this week 00:00:00');
-    $month_start_ts = strtotime(date('Y-m-01 00:00:00'));
-
-    if ($week_start_ts === false) {
-      $week_start_ts = $today_start_ts;
-    }
-
-    if ($month_start_ts === false) {
-      $month_start_ts = $today_start_ts;
-    }
-
-    // Einziger Fetch-Zyklus: rückwärts paginiert (neueste zuerst), bricht ab
-    // sobald ein Receipt älter als Monatsbeginn ist oder eine Seite nicht mehr
-    // vollständig gefüllt ist. Deckt sowohl Umsatz/Bestellungen als auch die
-    // Top-/Low-Performer-Aggregation aus den Transaktionen in einem Durchlauf ab.
-    $new_orders_today = 0;
-    $revenue_today     = 0.0;
-    $revenue_week      = 0.0;
-    $revenue_month     = 0.0;
     $listing_revenue_map = array();
     $listing_sales_map   = array();
-    $scan_success = false;
-    $scan_error   = '';
-    $scan_limit    = 100;
-    $scan_max_pages = 5;
 
-    for ($page = 0; $page < $scan_max_pages; $page++) {
-      $offset = $page * $scan_limit;
-      $receipts_response = bx_etsy_api_request(
-        'GET',
-        '/application/shops/' . (int)$shop_id . '/receipts?limit=' . (int)$scan_limit . '&offset=' . (int)$offset . '&was_paid=true&sort_on=created&sort_order=desc',
-        $access_token,
-        $client_id,
-        $shared_secret,
-        null,
-        $dashboard_request_timeout
-      );
+    if ($month_orders_query !== false) {
+      while ($order_row = xtc_db_fetch_array($month_orders_query)) {
+        $decoded = json_decode((string)($order_row['payload_json'] ?? ''), true);
+        $receipt = (is_array($decoded) && isset($decoded['receipt']) && is_array($decoded['receipt']))
+          ? $decoded['receipt']
+          : array();
 
-      if (empty($receipts_response['success']) || !isset($receipts_response['data']) || !is_array($receipts_response['data'])) {
-        $scan_error = (string)($receipts_response['error'] ?? 'Unbekannter API-Fehler');
-        break;
-      }
-
-      $scan_success = true;
-      $result['data_fetch_success'] = true;
-
-      $payload = $receipts_response['data'];
-      $page_receipts = array();
-
-      if (isset($payload['results']) && is_array($payload['results'])) {
-        $page_receipts = $payload['results'];
-      } elseif (isset($payload['receipts']) && is_array($payload['receipts'])) {
-        $page_receipts = $payload['receipts'];
-      }
-
-      if (empty($page_receipts)) {
-        break;
-      }
-
-      $stop_scan = false;
-
-      foreach ($page_receipts as $receipt) {
-        if (!is_array($receipt)) {
+        if (empty($receipt)) {
           continue;
-        }
-
-        $created_ts = bx_etsy_extract_receipt_created_ts($receipt);
-
-        if ($created_ts > 0 && $created_ts < $month_start_ts) {
-          $stop_scan = true;
-          break;
-        }
-
-        $receipt_total = (float)bx_etsy_extract_receipt_total_amount($receipt);
-
-        if ($created_ts >= $month_start_ts) {
-          $revenue_month += $receipt_total;
-        }
-
-        if ($created_ts >= $week_start_ts) {
-          $revenue_week += $receipt_total;
-        }
-
-        if ($created_ts >= $today_start_ts) {
-          $new_orders_today++;
-          $revenue_today += $receipt_total;
         }
 
         $transactions = bx_etsy_extract_receipt_transactions($receipt);
@@ -842,104 +751,130 @@ if (!function_exists('bx_etsy_get_dashboard_live_kpis')) {
           $listing_title = bx_etsy_extract_transaction_title($transaction);
           $transaction_amount = bx_etsy_extract_transaction_amount($transaction);
 
-          if (!isset($listing_revenue_map[$listing_title])) {
-            $listing_revenue_map[$listing_title] = 0.0;
-          }
-
-          if (!isset($listing_sales_map[$listing_title])) {
-            $listing_sales_map[$listing_title] = 0;
-          }
-
-          $listing_revenue_map[$listing_title] += $transaction_amount;
-          $listing_sales_map[$listing_title]++;
+          $listing_revenue_map[$listing_title] = ($listing_revenue_map[$listing_title] ?? 0.0) + $transaction_amount;
+          $listing_sales_map[$listing_title]   = ($listing_sales_map[$listing_title] ?? 0) + 1;
         }
-      }
-
-      if ($stop_scan || count($page_receipts) < $scan_limit) {
-        break;
       }
     }
 
-    if ($scan_success) {
-      $result['new_orders_today'] = $new_orders_today;
-      $result['revenue_today']    = $revenue_today;
-      $result['revenue_week']     = $revenue_week;
-      $result['revenue_month']    = $revenue_month;
-      $result['avg_order_today']  = ($new_orders_today > 0) ? ($revenue_today / $new_orders_today) : 0.0;
+    if (!empty($listing_revenue_map)) {
+      arsort($listing_revenue_map, SORT_NUMERIC);
+      $top_listings = array();
+      $top_counter  = 0;
 
-      if (!empty($listing_revenue_map)) {
-        arsort($listing_revenue_map, SORT_NUMERIC);
-
-        $top_listings = array();
-        $top_counter = 0;
-
-        foreach ($listing_revenue_map as $listing_title => $listing_revenue) {
-          $top_listings[] = array(
-            'title' => (string)$listing_title,
-            'revenue' => (float)$listing_revenue,
-          );
-
-          $top_counter++;
-          if ($top_counter >= 5) {
-            break;
-          }
+      foreach ($listing_revenue_map as $listing_title => $listing_revenue) {
+        $top_listings[] = array('title' => (string)$listing_title, 'revenue' => (float)$listing_revenue);
+        $top_counter++;
+        if ($top_counter >= 5) {
+          break;
         }
-
-        $result['top_listings'] = $top_listings;
       }
 
-      if (!empty($listing_sales_map)) {
-        asort($listing_sales_map, SORT_NUMERIC);
-
-        $low_performers = array();
-        $low_counter = 0;
-
-        foreach ($listing_sales_map as $listing_title => $sales_count) {
-          $low_performers[] = array(
-            'title' => (string)$listing_title,
-            'value' => (int)$sales_count,
-          );
-
-          $low_counter++;
-          if ($low_counter >= 5) {
-            break;
-          }
-        }
-
-        $result['low_performers'] = $low_performers;
-      }
-
-      if ($result['last_error'] === '' && $scan_error !== '') {
-        $result['last_error'] = 'Receipts (teilweise): ' . $scan_error;
-      }
-    } elseif ($result['last_error'] === '' && $scan_error !== '') {
-      $result['last_error'] = 'Receipts: ' . $scan_error;
+      $result['top_listings'] = $top_listings;
     }
 
-    $unshipped_response = bx_etsy_api_request(
-      'GET',
-      '/application/shops/' . (int)$shop_id . '/receipts?limit=100&was_paid=true&was_shipped=false&was_canceled=false',
-      $access_token,
-      $client_id,
-      $shared_secret,
-      null,
-      $dashboard_request_timeout
-    );
+    if (!empty($listing_sales_map)) {
+      asort($listing_sales_map, SORT_NUMERIC);
+      $low_performers = array();
+      $low_counter    = 0;
 
-    if (!empty($unshipped_response['success']) && isset($unshipped_response['data']) && is_array($unshipped_response['data'])) {
-      $result['data_fetch_success'] = true;
-      $payload = $unshipped_response['data'];
-
-      if (isset($payload['count']) && is_numeric($payload['count'])) {
-        $result['unshipped_count'] = (int)$payload['count'];
-      } elseif (isset($payload['results']) && is_array($payload['results'])) {
-        $result['unshipped_count'] = count($payload['results']);
-      } elseif (isset($payload['receipts']) && is_array($payload['receipts'])) {
-        $result['unshipped_count'] = count($payload['receipts']);
+      foreach ($listing_sales_map as $listing_title => $sales_count) {
+        $low_performers[] = array('title' => (string)$listing_title, 'value' => (int)$sales_count);
+        $low_counter++;
+        if ($low_counter >= 5) {
+          break;
+        }
       }
 
-    } elseif ($result['last_error'] === '') {
-      $result['last_error'] = 'Unshipped: ' . (string)($unshipped_response['error'] ?? 'Unbekannter API-Fehler');
+      $result['low_performers'] = $low_performers;
+    }
+
+    // --- Neue Bewertungen heute: einziger verbleibender Live-Call, da es
+    //     dafür noch keine lokale Synchronisation gibt. Kurz gecacht, damit
+    //     nicht jeder Dashboard-Aufruf einen Etsy-Request auslöst. ---
+    $result['new_reviews_today'] = bx_etsy_get_new_reviews_today_cached($shop_id, $is_mock_mode, $result['connection_active']);
+
+    return $result;
+  }
+}
+
+/**
+ * Holt die Anzahl neuer Etsy-Bewertungen heute (einziger verbleibender
+ * Live-API-Call im Dashboard) und cached das Ergebnis kurz, um nicht bei
+ * jedem Seitenaufruf einen Etsy-Request auszulösen.
+ *
+ * @param string $shop_id
+ * @param bool $is_mock_mode
+ * @param bool $connection_active
+ * @return int|null
+ */
+if (!function_exists('bx_etsy_get_new_reviews_today_cached')) {
+  function bx_etsy_get_new_reviews_today_cached(string $shop_id, bool $is_mock_mode, bool $connection_active): ?int
+  {
+    global $modified_cache;
+
+    if (!$is_mock_mode && !$connection_active) {
+      return null;
+    }
+
+    $cache_minutes = defined('MODULE_BX_ETSY_MANAGER_DASHBOARD_CACHE_MINUTES')
+      ? (int)constant('MODULE_BX_ETSY_MANAGER_DASHBOARD_CACHE_MINUTES')
+      : 15;
+    if ($cache_minutes < 0) {
+      $cache_minutes = 0;
+    }
+    $cache_ttl_seconds = $is_mock_mode ? 0 : ($cache_minutes * 60);
+
+    $cache_key     = 'bx_etsy_dashboard_reviews_today_v1_' . $shop_id . '_' . ($is_mock_mode ? 'mock' : 'live');
+    $cache_backend = null;
+
+    if ($cache_ttl_seconds > 0 && defined('DB_CACHE') && DB_CACHE == 'true') {
+      if (!is_object($modified_cache) && defined('DIR_FS_CATALOG')) {
+        include_once(DIR_FS_CATALOG . 'includes/modified_cache.php');
+      }
+
+      if (is_object($modified_cache)) {
+        $cache_backend = $modified_cache;
+        $cache_backend->setId($cache_key);
+
+        if ($cache_backend->isHit() !== false) {
+          $cached_value = $cache_backend->get();
+          if ($cached_value !== null) {
+            return (int)$cached_value;
+          }
+        }
+      }
+    }
+
+    $access_token = 'mock_access_token';
+
+    if (!$is_mock_mode) {
+      if (!function_exists('bx_etsy_get_valid_token')) {
+        return null;
+      }
+
+      $token_data = bx_etsy_get_valid_token($shop_id);
+      if (!$token_data || empty($token_data['access_token'])) {
+        return null;
+      }
+
+      $access_token = (string)$token_data['access_token'];
+    }
+
+    $client_id      = (string)MODULE_BX_ETSY_MANAGER_KEYSTRING;
+    $shared_secret  = (string)MODULE_BX_ETSY_MANAGER_SHARED_SECRET;
+    $request_timeout = defined('MODULE_BX_ETSY_MANAGER_DASHBOARD_REQUEST_TIMEOUT')
+      ? (int)constant('MODULE_BX_ETSY_MANAGER_DASHBOARD_REQUEST_TIMEOUT')
+      : 8;
+    if ($request_timeout < 3) {
+      $request_timeout = 3;
+    } elseif ($request_timeout > 30) {
+      $request_timeout = 30;
+    }
+
+    $today_start_ts = strtotime(date('Y-m-d 00:00:00'));
+    if ($today_start_ts === false) {
+      $today_start_ts = time();
     }
 
     $reviews_response = bx_etsy_api_request(
@@ -949,45 +884,48 @@ if (!function_exists('bx_etsy_get_dashboard_live_kpis')) {
       $client_id,
       $shared_secret,
       null,
-      $dashboard_request_timeout
+      $request_timeout
     );
 
-    if (!empty($reviews_response['success']) && isset($reviews_response['data']) && is_array($reviews_response['data'])) {
-      $result['data_fetch_success'] = true;
-      $payload = $reviews_response['data'];
-
-      if (isset($payload['count']) && is_numeric($payload['count'])) {
-        $result['new_reviews_today'] = (int)$payload['count'];
-      } elseif (isset($payload['results']) && is_array($payload['results'])) {
-        $result['new_reviews_today'] = count($payload['results']);
-      } elseif (isset($payload['reviews']) && is_array($payload['reviews'])) {
-        $result['new_reviews_today'] = count($payload['reviews']);
-      }
-    } elseif ($result['last_error'] === '') {
-      $result['last_error'] = 'Reviews: ' . (string)($reviews_response['error'] ?? 'Unbekannter API-Fehler');
+    if (empty($reviews_response['success']) || !isset($reviews_response['data']) || !is_array($reviews_response['data'])) {
+      return null;
     }
 
-    if ($cache_ttl_seconds > 0 && is_object($cache_backend)) {
+    $payload = $reviews_response['data'];
+    $count   = null;
+
+    if (isset($payload['count']) && is_numeric($payload['count'])) {
+      $count = (int)$payload['count'];
+    } elseif (isset($payload['results']) && is_array($payload['results'])) {
+      $count = count($payload['results']);
+    } elseif (isset($payload['reviews']) && is_array($payload['reviews'])) {
+      $count = count($payload['reviews']);
+    }
+
+    if ($count !== null && $cache_ttl_seconds > 0 && is_object($cache_backend)) {
       $cache_backend->setId($cache_key);
-      $cache_backend->set($result, (int)$cache_ttl_seconds);
-      $cache_backend->setTags(array('bx_etsy_manager', 'bx_etsy_dashboard_kpis'));
-    } elseif (is_object($cache_backend)) {
-      $cache_backend->delete($cache_key);
+      $cache_backend->set($count, (int)$cache_ttl_seconds);
+      $cache_backend->setTags(array('bx_etsy_manager', 'bx_etsy_dashboard_reviews'));
     }
 
-    return $result;
+    return $count;
   }
 }
 
 /**
- * Baut die Dashboard-Daten für die Admin-Ansicht zusammen
- * 
+ * Baut die Dashboard-Daten für die Admin-Ansicht zusammen.
+ *
+ * KPIs kommen aus der lokalen Tabelle bx_etsy_orders (siehe
+ * bx_etsy_get_dashboard_kpis()) und sind daher auch dann sichtbar, wenn die
+ * Etsy-Verbindung gerade unterbrochen ist - der Verbindungsstatus wird
+ * separat als Hinweistext ausgewiesen, statt das Dashboard leerzuräumen.
+ *
  * @return array Assoziatives Array mit KPIs, Top Listings, Low Performers und Aktivitäten
  */
 function bx_etsy_build_dashboard_data() {
   global $xtPrice;
-  $live_kpis = bx_etsy_get_dashboard_live_kpis();
-  
+  $kpis = bx_etsy_get_dashboard_kpis();
+
   $format_currency = static function ($amount) use (&$xtPrice) {
     if (is_object($xtPrice) && method_exists($xtPrice, 'xtcFormatCurrency')) {
       return (string)$xtPrice->xtcFormatCurrency((float)$amount);
@@ -996,87 +934,78 @@ function bx_etsy_build_dashboard_data() {
     return number_format((float)$amount, 2, ',', '.');
   };
 
-  $connection_active  = !empty($live_kpis['connection_active']);
-  $data_fetch_success = !empty($live_kpis['data_fetch_success']);
-  $last_error         = trim((string)($live_kpis['last_error'] ?? ''));
+  $connection_active = !empty($kpis['connection_active']);
+  $last_error        = trim((string)($kpis['last_error'] ?? ''));
+  $last_synced_at     = $kpis['last_synced_at'] ?? null;
 
-  $etsy_reachable = (
-    $live_kpis['revenue_today']       !== null
-    || $live_kpis['revenue_week']     !== null
-    || $live_kpis['revenue_month']    !== null
-    || $live_kpis['new_orders_today'] !== null
-    || $live_kpis['unshipped_count']  !== null
-    || $live_kpis['new_reviews_today'] !== null
-  );
+  // Shop konfiguriert und lokale Abfrage erfolgreich? Dann gibt es echte Zahlen,
+  // unabhaengig vom aktuellen Live-Verbindungsstatus (siehe Docblock).
+  $shop_configured = ($kpis['revenue_today'] !== null);
 
-  $offline_note      = 'Zur Zeit keine Verbindung zu Etsy.';
-  $degraded_note     = 'Verbindung zu Etsy ist aktiv, Live-Datenabruf aktuell nicht möglich.';
-  $kpi_fallback_note = 'Live-Datenabruf eingeschränkt, es werden Nullwerte angezeigt.';
-
-  if (!$connection_active) {
-    $kpi_fallback_note = $offline_note;
+  $connection_hint = '';
+  if ($shop_configured) {
+    $connection_hint = $connection_active
+      ? ($last_synced_at !== null ? ' (zuletzt synchronisiert: ' . date('d.m.Y H:i', strtotime($last_synced_at)) . ')' : '')
+      : ' (Etsy-Verbindung derzeit getrennt - zeigt zuletzt synchronisierte Werte' . ($last_synced_at !== null ? ' vom ' . date('d.m.Y H:i', strtotime($last_synced_at)) : '') . ')';
   }
 
-  $revenue_today_value = $connection_active ? $format_currency(0.0) : '-';
-  $revenue_today_note  = $connection_active ? 'Heute bisher keine bezahlten Etsy-Bestellungen.' : $kpi_fallback_note;
+  $not_configured_note = 'Kein Etsy-Shop konfiguriert bzw. lokale Daten nicht verfügbar.';
 
-  if ($live_kpis['revenue_today'] !== null) {
-    $revenue_today_value = $format_currency((float)$live_kpis['revenue_today']);
+  // --- Umsatz heute ---
+  $revenue_today_value = $shop_configured ? $format_currency((float)$kpis['revenue_today']) : '-';
+  $orders_today        = (int)($kpis['new_orders_today'] ?? 0);
+  $avg_order_today     = (float)($kpis['avg_order_today'] ?? 0.0);
 
-    $orders_today              = (int)($live_kpis['new_orders_today'] ?? 0);
-    $avg_order_today           = (float)($live_kpis['avg_order_today'] ?? 0.0);
-    $avg_order_today_formatted = $format_currency($avg_order_today);
-
-    if ($orders_today > 0) {
-      $revenue_today_note = $orders_today . ' Bestellungen, durchschnittlich ' . $avg_order_today_formatted;
-    } else {
-      $revenue_today_note = 'Heute bisher keine bezahlten Etsy-Bestellungen.';
-    }
+  if (!$shop_configured) {
+    $revenue_today_note = $not_configured_note;
+  } elseif ($orders_today > 0) {
+    $revenue_today_note = $orders_today . ' Bestellungen, durchschnittlich ' . $format_currency($avg_order_today) . $connection_hint;
+  } else {
+    $revenue_today_note = 'Heute bisher keine bezahlten Etsy-Bestellungen.' . $connection_hint;
   }
 
-  $new_orders_today_value = $connection_active ? '0' : '-';
-  $new_orders_today_note  = $connection_active ? 'Heute bisher keine neuen Etsy-Bestellungen.' : $kpi_fallback_note;
-
-  if ($live_kpis['new_orders_today'] !== null) {
-    $new_orders_today_value = (string)(int)$live_kpis['new_orders_today'];
-    if ((int)$live_kpis['new_orders_today'] > 0) {
-      $new_orders_today_note = 'Live aus Etsy-Receipts (heute)';
-    } else {
-      $new_orders_today_note = 'Heute bisher keine neuen Etsy-Bestellungen.';
-    }
+  // --- Neue Bestellungen heute ---
+  $new_orders_today_value = $shop_configured ? (string)$orders_today : '-';
+  if (!$shop_configured) {
+    $new_orders_today_note = $not_configured_note;
+  } elseif ($orders_today > 0) {
+    $new_orders_today_note = 'Aus lokaler Synchronisation (heute)' . $connection_hint;
+  } else {
+    $new_orders_today_note = 'Heute bisher keine neuen Etsy-Bestellungen.' . $connection_hint;
   }
 
-  $unshipped_count_value = $connection_active ? '0' : '-';
-  $unshipped_count_note  = $connection_active ? 'Aktuell keine offenen, bezahlten Sendungen.' : $kpi_fallback_note;
-
-  if ($live_kpis['unshipped_count'] !== null) {
-    $unshipped_count_value = (string)(int)$live_kpis['unshipped_count'];
-    if ((int)$live_kpis['unshipped_count'] > 0) {
-      $unshipped_count_note = 'Offene, bezahlte Etsy-Bestellungen';
-    } else {
-      $unshipped_count_note = 'Aktuell keine offenen, bezahlten Sendungen.';
-    }
+  // --- Unversendete Bestellungen ---
+  $unshipped_count = (int)($kpis['unshipped_count'] ?? 0);
+  $unshipped_count_value = $shop_configured ? (string)$unshipped_count : '-';
+  if (!$shop_configured) {
+    $unshipped_count_note = $not_configured_note;
+  } elseif ($unshipped_count > 0) {
+    $unshipped_count_note = 'Offene, bezahlte Etsy-Bestellungen' . $connection_hint;
+  } else {
+    $unshipped_count_note = 'Aktuell keine offenen, bezahlten Sendungen.' . $connection_hint;
   }
 
+  // --- Neue Bewertungen heute (einziger noch live abgefragter Wert) ---
+  $new_reviews_value = $shop_configured ? '0' : '-';
+  $new_reviews_note  = $shop_configured
+    ? ($connection_active ? 'Heute bisher keine neuen Etsy-Bewertungen.' : 'Etsy-Verbindung derzeit getrennt.')
+    : $not_configured_note;
+
+  if ($kpis['new_reviews_today'] !== null) {
+    $new_reviews_value = (string)(int)$kpis['new_reviews_today'];
+    $new_reviews_note  = ((int)$kpis['new_reviews_today'] > 0)
+      ? 'Live aus Etsy-Reviews (heute)'
+      : 'Heute bisher keine neuen Etsy-Bewertungen.';
+  }
+
+  // --- Top-/Low-Performer-Listings + Aktivitäten-Feed ---
   $top_listings   = array();
   $low_performers = array();
   $activities     = array();
 
-  $new_reviews_value = $connection_active ? '0' : '-';
-  $new_reviews_note  = $connection_active ? 'Heute bisher keine neuen Etsy-Bewertungen.' : $kpi_fallback_note;
-
-  if ($live_kpis['new_reviews_today'] !== null) {
-    $new_reviews_value = (string)(int)$live_kpis['new_reviews_today'];
-    if ((int)$live_kpis['new_reviews_today'] > 0) {
-      $new_reviews_note = 'Live aus Etsy-Reviews (heute)';
-    } else {
-      $new_reviews_note = 'Heute bisher keine neuen Etsy-Bewertungen.';
-    }
-  }
-
-  if ($etsy_reachable) {
-    if (!empty($live_kpis['top_listings'])) {
-      foreach ($live_kpis['top_listings'] as $top_listing) {
+  if ($shop_configured) {
+    if (!empty($kpis['top_listings'])) {
+      foreach ($kpis['top_listings'] as $top_listing) {
         $top_listings[] = array(
           'title' => (string)$top_listing['title'],
           'value' => $format_currency((float)$top_listing['revenue']),
@@ -1086,8 +1015,8 @@ function bx_etsy_build_dashboard_data() {
       $top_listings[] = array('title' => 'Im aktuellen Monat noch keine umsatzstarken Listings', 'value' => '-');
     }
 
-    if (!empty($live_kpis['low_performers']) && is_array($live_kpis['low_performers'])) {
-      foreach ($live_kpis['low_performers'] as $low_performer) {
+    if (!empty($kpis['low_performers']) && is_array($kpis['low_performers'])) {
+      foreach ($kpis['low_performers'] as $low_performer) {
         $low_performers[] = array(
           'title' => (string)($low_performer['title'] ?? 'Unbekanntes Listing'),
           'value' => (string)((int)($low_performer['value'] ?? 0)),
@@ -1097,52 +1026,43 @@ function bx_etsy_build_dashboard_data() {
       $low_performers[] = array('title' => 'Im aktuellen Monat liegen noch keine Listing-Verkäufe vor', 'value' => '0');
     }
 
-    $today_orders_count = ($live_kpis['new_orders_today'] !== null) ? (int)$live_kpis['new_orders_today'] : 0;
-    $unshipped_count    = ($live_kpis['unshipped_count'] !== null) ? (int)$live_kpis['unshipped_count'] : 0;
-    $top_count          = !empty($live_kpis['top_listings']) ? (int)count($live_kpis['top_listings']) : 0;
+    $top_count = !empty($kpis['top_listings']) ? (int)count($kpis['top_listings']) : 0;
 
-    if ($today_orders_count === 0 && $unshipped_count === 0 && $top_count === 0) {
+    if ($orders_today === 0 && $unshipped_count === 0 && $top_count === 0) {
       $activities[] = array(
         'time' => date('d.m.Y H:i'),
-        'type' => 'Live',
-        'text' => 'Live-Daten erfolgreich aktualisiert. Aktuell liegen für heute keine Bestellungen/Umsätze vor.',
+        'type' => 'Sync',
+        'text' => 'Lokale Daten aktuell. Aktuell liegen für heute keine Bestellungen/Umsätze vor.' . $connection_hint,
       );
     } else {
       $activities[] = array(
         'time' => date('d.m.Y H:i'),
-        'type' => 'Live',
-        'text' => 'Live-Daten erfolgreich aktualisiert: Heute ' . $today_orders_count . ' Bestellungen, ' . $unshipped_count . ' unversendet, ' . $top_count . ' Top-Listings mit Umsatz.',
+        'type' => 'Sync',
+        'text' => 'Lokale Daten aktuell: Heute ' . $orders_today . ' Bestellungen, ' . $unshipped_count . ' unversendet, ' . $top_count . ' Top-Listings mit Umsatz.' . $connection_hint,
       );
     }
-  } elseif ($connection_active && !$data_fetch_success) {
-    $top_listings[]   = array('title' => 'Verbindung aktiv, Abruf derzeit nicht möglich', 'value' => '-');
-    $low_performers[] = array('title' => 'Verbindung aktiv, Abruf derzeit nicht möglich', 'value' => '-');
-    $degraded_text = $degraded_note;
-    if ($last_error !== '') {
-      $degraded_text .= ' (' . $last_error . ')';
+
+    if (!$connection_active) {
+      $activities[] = array(
+        'time' => '-',
+        'type' => 'Verbindung',
+        'text' => 'Etsy-Verbindung derzeit getrennt. Neue Bestellungen können bis zur Wiederverbindung nicht mehr synchronisiert werden.',
+      );
     }
-    $activities[]     = array('time' => '-', 'type' => 'Abruf', 'text' => $degraded_text);
+  } elseif ($last_error !== '') {
+    $top_listings[]   = array('title' => 'Lokale Daten nicht verfügbar', 'value' => '-');
+    $low_performers[] = array('title' => 'Lokale Daten nicht verfügbar', 'value' => '-');
+    $activities[]     = array('time' => '-', 'type' => 'Fehler', 'text' => $last_error);
   } else {
-    $top_listings[]   = array('title' => 'Zur Zeit keine Verbindung zu Etsy', 'value' => '-');
-    $low_performers[] = array('title' => 'Zur Zeit keine Verbindung zu Etsy', 'value' => '-');
-    $activities[]     = array('time' => '-', 'type' => 'Verbindung', 'text' => 'Zur Zeit keine Verbindung zu Etsy. Bitte Token/Verbindung prüfen.');
+    $top_listings[]   = array('title' => 'Kein Etsy-Shop konfiguriert', 'value' => '-');
+    $low_performers[] = array('title' => 'Kein Etsy-Shop konfiguriert', 'value' => '-');
+    $activities[]     = array('time' => '-', 'type' => 'Konfiguration', 'text' => 'Bitte Shop-ID und Zugangsdaten im Modul konfigurieren.');
   }
 
-  $revenue_week_value = ($live_kpis['revenue_week'] !== null)
-    ? $format_currency((float)$live_kpis['revenue_week'])
-    : ($connection_active ? $format_currency(0.0) : '-');
-
-  $revenue_week_note = ($live_kpis['revenue_week'] !== null)
-    ? 'Live aus Etsy-Receipts (seit Wochenbeginn)'
-    : ($connection_active ? 'Seit Wochenbeginn bisher kein Umsatz.' : $kpi_fallback_note);
-
-  $revenue_month_value = ($live_kpis['revenue_month'] !== null)
-    ? $format_currency((float)$live_kpis['revenue_month'])
-    : ($connection_active ? $format_currency(0.0) : '-');
-
-  $revenue_month_note = ($live_kpis['revenue_month'] !== null)
-    ? 'Live aus Etsy-Receipts (seit Monatsbeginn)'
-    : ($connection_active ? 'Seit Monatsbeginn bisher kein Umsatz.' : $kpi_fallback_note);
+  $revenue_week_value  = $shop_configured ? $format_currency((float)$kpis['revenue_week'])  : '-';
+  $revenue_week_note   = $shop_configured ? ('Seit Wochenbeginn' . $connection_hint) : $not_configured_note;
+  $revenue_month_value = $shop_configured ? $format_currency((float)$kpis['revenue_month']) : '-';
+  $revenue_month_note  = $shop_configured ? ('Seit Monatsbeginn' . $connection_hint) : $not_configured_note;
 
   return array(
     'kpis' => array(

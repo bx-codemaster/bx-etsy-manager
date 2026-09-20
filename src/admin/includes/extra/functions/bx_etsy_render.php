@@ -852,6 +852,8 @@ if (!function_exists('bx_etsy_render_tab_dashboard')) {
                   <div class="main dashboard-intro">
                     <strong>Dashboard</strong>
                     <p>Hier ist die zentrale Übersicht für Umsatz, Bestellungen, Renner, Penner und letzte Aktivitäten Ihres Etsy-Shops.</p>
+                    <button id="bx-etsy-manual-sync-btn" class="button" style="font-size: 13px; padding: 8px 15px;">🔄 Jetzt synchronisieren</button>
+                    <span id="bx-etsy-manual-sync-status" style="margin-left: 10px; font-size: 13px;"></span>
                   </div>
 
                   <table class="dashboard-table dashboard-kpi-table" border="0" width="100%" cellspacing="0" cellpadding="0">

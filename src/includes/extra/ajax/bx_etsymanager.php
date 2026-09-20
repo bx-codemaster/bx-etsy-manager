@@ -270,6 +270,70 @@ class bx_etsymanager
   }
 
   /**
+   * Stößt den Bestellungen-Sync manuell an - nutzt exakt dieselbe Funktion
+   * wie der echte Cronjob. Gedacht für Testbetrieb ohne eingerichteten
+   * System-Cronjob, und als "Jetzt aktualisieren"-Option im Admin.
+   */
+  public function trigger_manual_sync()
+  {
+    $sync_file = DIR_FS_CATALOG . 'api/scheduled_tasks/modules/bx_etsy_orders_sync.php';
+
+    if (!is_file($sync_file)) {
+      return bx_etsy_ajax_encode_json(array(
+        'success' => false,
+        'error'   => 'Sync-Modul (bx_etsy_orders_sync.php) nicht gefunden.',
+      ));
+    }
+
+    require_once($sync_file);
+
+    if (!function_exists('cron_bx_etsy_orders_sync')) {
+      return bx_etsy_ajax_encode_json(array(
+        'success' => false,
+        'error'   => 'Sync-Funktion cron_bx_etsy_orders_sync() nicht verfügbar.',
+      ));
+    }
+
+    $shop_id      = trim((string)MODULE_BX_ETSY_MANAGER_SHOP_ID);
+    $count_before = 0;
+
+    if ($shop_id !== '') {
+      $before_query = xtc_db_query("SELECT COUNT(*) AS cnt FROM bx_etsy_orders WHERE shop_id = '" . xtc_db_input($shop_id) . "'");
+      $before_row   = ($before_query !== false) ? xtc_db_fetch_array($before_query) : null;
+      $count_before = $before_row ? (int)$before_row['cnt'] : 0;
+    }
+
+    try {
+      $sync_ok = cron_bx_etsy_orders_sync();
+    } catch (\Throwable $e) {
+      return bx_etsy_ajax_encode_json(array(
+        'success' => false,
+        'error'   => get_class($e) . ': ' . $e->getMessage(),
+      ));
+    }
+
+    $count_after = $count_before;
+
+    if ($shop_id !== '') {
+      $after_query = xtc_db_query("SELECT COUNT(*) AS cnt FROM bx_etsy_orders WHERE shop_id = '" . xtc_db_input($shop_id) . "'");
+      $after_row   = ($after_query !== false) ? xtc_db_fetch_array($after_query) : null;
+      $count_after = $after_row ? (int)$after_row['cnt'] : $count_before;
+    }
+
+    $new_orders = max(0, $count_after - $count_before);
+
+    return bx_etsy_ajax_encode_json(array(
+      'success'      => (bool)$sync_ok,
+      'count_before' => $count_before,
+      'count_after'  => $count_after,
+      'new_orders'   => $new_orders,
+      'message'      => $sync_ok
+        ? ('Sync abgeschlossen. ' . $new_orders . ' neue Bestellung(en). Insgesamt ' . $count_after . ' in der lokalen Tabelle.')
+        : 'Sync mit Fehlern beendet - Details siehe log/bx_etsy_orders_sync.log.',
+    ));
+  }
+
+  /**
    * Rendert einen einzelnen Tab (Content + rechte Sidebar) für Lazy-Loading per AJAX.
    * Nutzt dieselben Render-Funktionen wie der volle Seitenaufruf (bx_etsy_render.php),
    * damit sich Inhalte nicht auseinanderentwickeln.

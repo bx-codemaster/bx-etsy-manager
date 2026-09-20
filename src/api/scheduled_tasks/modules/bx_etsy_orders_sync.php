@@ -251,8 +251,8 @@ if (!function_exists('cron_bx_etsy_orders_sync')) {
         ($last_error !== '' ? ' | FEHLER: ' . $last_error : '') . ' ===');
 
       return true;
-    } catch (Exception $e) {
-      $bx_log('error', 'Exception: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    } catch (\Throwable $e) {
+      $bx_log('error', get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
       return true;
     } finally {
       xtc_db_query("DO RELEASE_LOCK('" . xtc_db_input($lock_name) . "')");
@@ -312,6 +312,7 @@ if (!function_exists('bx_etsy_orders_sync_upsert_receipt')) {
     }
 
     $order_status = $payment_status;
+    $is_shipped   = !empty($receipt['is_shipped']) ? 1 : 0;
 
     $etsy_updated_at_ts = bx_etsy_orders_sync_pick_timestamp($receipt, array('updated_timestamp', 'updated_at', 'last_modified_timestamp'));
     $etsy_updated_at = $etsy_updated_at_ts > 0 ? date('Y-m-d H:i:s', $etsy_updated_at_ts) : null;
@@ -354,6 +355,7 @@ if (!function_exists('bx_etsy_orders_sync_upsert_receipt')) {
       'grand_total_gross'    => number_format($grand_total, 4, '.', ''),
       'payment_status'       => $payment_status,
       'order_status'         => $order_status,
+      'is_shipped'           => $is_shipped,
       'invoice_number'       => '',
       'order_reference_shop' => (string)$shop_id,
       'etsy_updated_at'      => $etsy_updated_at,
@@ -377,6 +379,7 @@ if (!function_exists('bx_etsy_orders_sync_upsert_receipt')) {
                       grand_total_gross,
                       payment_status,
                       order_status,
+                      is_shipped,
                       invoice_number,
                       order_reference_shop,
                       etsy_updated_at,
@@ -398,6 +401,7 @@ if (!function_exists('bx_etsy_orders_sync_upsert_receipt')) {
                       '" . xtc_db_input($sync_data['grand_total_gross']) . "',
                       '" . xtc_db_input($sync_data['payment_status']) . "',
                       '" . xtc_db_input($sync_data['order_status']) . "',
+                      " . (int)$sync_data['is_shipped'] . ",
                       " . ($sync_data['invoice_number'] !== '' ? "'" . xtc_db_input($sync_data['invoice_number']) . "'" : 'NULL') . ",
                       '" . xtc_db_input($sync_data['order_reference_shop']) . "',
                       " . ($sync_data['etsy_updated_at'] !== null ? "'" . xtc_db_input($sync_data['etsy_updated_at']) . "'" : 'NULL') . ",
@@ -417,6 +421,7 @@ if (!function_exists('bx_etsy_orders_sync_upsert_receipt')) {
                       grand_total_gross = VALUES(grand_total_gross),
                       payment_status = VALUES(payment_status),
                       order_status = VALUES(order_status),
+                      is_shipped = VALUES(is_shipped),
                       invoice_number = VALUES(invoice_number),
                       order_reference_shop = VALUES(order_reference_shop),
                       etsy_updated_at = VALUES(etsy_updated_at),
