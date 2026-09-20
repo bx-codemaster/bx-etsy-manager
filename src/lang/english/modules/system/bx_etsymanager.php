@@ -77,5 +77,10 @@
   define('MODULE_BX_ETSY_MANAGER_CHECK_INTERVAL_TITLE', 'Check interval');
   define('MODULE_BX_ETSY_MANAGER_CHECK_INTERVAL_DESC', 'Interval for the Etsy order sync.');
   define('MODULE_BX_ETSY_MANAGER_CHECK_UNIT_TITLE', 'Check unit');
-  define('MODULE_BX_ETSY_MANAGER_CHECK_UNIT_DESC', 'Unit for the Etsy order sync (m, h, d, w).');
+  define('MODULE_BX_ETSY_MANAGER_CHECK_UNIT_DESC', 'Unit for the Etsy order sync (monthly, weekly, daily, hourly).');
+  
+  defined('CFG_TXT_M') || define('CFG_TXT_M', 'monthly');
+  defined('CFG_TXT_W') || define('CFG_TXT_W', 'weekly');
+  defined('CFG_TXT_D') || define('CFG_TXT_D', 'daily');
+  defined('CFG_TXT_H') || define('CFG_TXT_H', 'hourly');
   

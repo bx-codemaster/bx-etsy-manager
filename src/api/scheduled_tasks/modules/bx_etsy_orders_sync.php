@@ -145,7 +145,7 @@ if (!function_exists('cron_bx_etsy_orders_sync')) {
       $processed_count         = 0;
       $skipped_unchanged_count = 0;
       $last_error              = '';
-      $max_iterations          = 2000; // z.B. 20.000 Datensätze als harte Obergrenze
+      $max_iterations          = 200; // z.B. 20.000 Datensätze als harte Obergrenze ($max_iterations 200 x $page_limit 100 = 20.000)
       $iteration               = 0;
 
       while (true) {

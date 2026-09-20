@@ -270,7 +270,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', '<?php echo DIR_WS_CATALOG; ?>ajax.php?ext=bx_etsymanager&method=trigger_manual_sync', true);
+        xhr.open('POST', '<?php echo DIR_WS_CATALOG; ?>ajax.php?ext=bx_etsymanager&method=trigger_manual_sync&type=html', true);
         xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
         xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 
@@ -293,7 +293,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
 
                 const response = JSON.parse(raw);
-
+   
                 if (response.success) {
                     if (statusEl) {
                         // textContent statt innerHTML: Nachricht kann Zaehler aus der DB enthalten,

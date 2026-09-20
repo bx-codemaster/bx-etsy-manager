@@ -970,11 +970,11 @@ if (!function_exists('bx_etsy_render_tab_dashboard')) {
       // greift - Inline-Scripts werden bei per innerHTML nachgeladenem HTML vom Browser nicht ausgefuehrt.
       // Der Countdown-Bereich ist zudem vom Button getrennt, da initTokenCountdown() den Container per
       // innerHTML ueberschreibt und sonst den "Trennen"-Button mit entfernen wuerde.
-    $expires_timestamp = strtotime($etsy_token_data['expires_at']);
+    $expires_timestamp = strtotime($etsy_token_data['expires_at']);   
     $remaining_time = '<article class="bx-panel">
                       <div id="bx-etsy-token-countdown" class="bx-etsy-token-countdown" data-expires-timestamp="' . (int)$expires_timestamp . '">
                         <p>Lade Timer...</p>
-                      </div>' . xtc_button_link('⭕ Trennen', xtc_href_link(FILENAME_ETSY_MANAGER, 'action=disconnect')) . '</article>';
+                      </div>' . xtc_button_link('⭕ Trennen', xtc_href_link(DIR_ADMIN.FILENAME_ETSY_MANAGER, 'action=disconnect')) . '</article>';
 
     ob_start();
     ?>
@@ -1022,7 +1022,9 @@ if (!function_exists('bx_etsy_render_tab_dashboard')) {
         </div>
         <div class="txta-c">
           <p>Verbinden Sie Ihren Shop mit Etsy</p>
-          <div style="margin-top: 10px;">' . xtc_button_link('🔗 Verbinden', xtc_href_link(FILENAME_ETSY_MANAGER, 'action=connect')) . '</div>
+          <div style="margin-top: 10px;">
+            <a href="' . xtc_href_link(DIR_ADMIN.FILENAME_ETSY_MANAGER, 'action=connect') . '" class="button">🔗 Verbinden</a>
+          </div>
           <p style="color: #666;">Sie werden zu Etsy weitergeleitet</p>
         </div>
       </article>';
