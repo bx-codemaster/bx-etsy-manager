@@ -22,7 +22,7 @@
     <details class="bxac-card">
     <summary class="bxac-summary" style="list-style: none;">
       <span class="bxac-arrow">▸</span>
-      ' . xtc_image(DIR_WS_ICONS.'heading/bx_etsymanager.png', 'BX Etsy Manager', '', '', 'style="max-height: 32px; margin: 2px;"') . '
+      ' . xtc_image(DIR_WS_ICONS.'heading/bx_etsymanager.png', 'BX Etsy Manager') . '
       <span class="bxac-title">BX Etsy Manager</span>
     </summary>
     <div class="bxac-body">

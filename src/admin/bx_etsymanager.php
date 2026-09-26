@@ -189,8 +189,8 @@ if ($action == 'personalization_get' && BX_ETSY_AVAILABLE) {
     xtc_redirect(xtc_href_link(FILENAME_ETSY_MANAGER));
   }
 
-  $shop_id = trim((string)MODULE_BX_ETSY_MANAGER_SHOP_ID);
-  $client_id = trim((string)MODULE_BX_ETSY_MANAGER_KEYSTRING);
+  $shop_id       = trim((string)MODULE_BX_ETSY_MANAGER_SHOP_ID);
+  $client_id     = trim((string)MODULE_BX_ETSY_MANAGER_KEYSTRING);
   $shared_secret = trim((string)MODULE_BX_ETSY_MANAGER_SHARED_SECRET);
 
   if ($shop_id === '' || $client_id === '' || $shared_secret === '') {
